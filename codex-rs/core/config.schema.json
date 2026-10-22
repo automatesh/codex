@@ -1416,6 +1416,36 @@
       },
       "type": "object"
     },
+    "ControlsConfig": {
+      "additionalProperties": false,
+      "properties": {
+        "dangerous_commands": {
+          "allOf": [
+            {
+              "$ref": "#/definitions/DangerousCommands"
+            }
+          ],
+          "default": "confirm"
+        },
+        "hooks": {
+          "allOf": [
+            {
+              "$ref": "#/definitions/HookControl"
+            }
+          ],
+          "default": "approved-only"
+        },
+        "managed_requirements": {
+          "allOf": [
+            {
+              "$ref": "#/definitions/ManagedRequirements"
+            }
+          ],
+          "default": "local-only"
+        }
+      },
+      "type": "object"
+    },
     "CopyOnSelect": {
       "description": "When mouse selections are copied on release.",
       "oneOf": [
@@ -1545,6 +1575,15 @@
       "enum": [
         "system",
         "external"
+      ],
+      "type": "string"
+    },
+    "DangerousCommands": {
+      "enum": [
+        "confirm",
+        "warn",
+        "block",
+        "off"
       ],
       "type": "string"
     },
@@ -1795,6 +1834,46 @@
       ],
       "type": "string"
     },
+    "ForkConfig": {
+      "additionalProperties": false,
+      "properties": {
+        "controls": {
+          "allOf": [
+            {
+              "$ref": "#/definitions/ControlsConfig"
+            }
+          ],
+          "default": {
+            "dangerous_commands": "confirm",
+            "hooks": "approved-only",
+            "managed_requirements": "local-only"
+          }
+        },
+        "git_attribution": {
+          "allOf": [
+            {
+              "$ref": "#/definitions/GitAttributionConfig"
+            }
+          ],
+          "default": {
+            "commit_trailer": "",
+            "pr_footer": ""
+          }
+        },
+        "instructions": {
+          "allOf": [
+            {
+              "$ref": "#/definitions/InstructionConfig"
+            }
+          ],
+          "default": {
+            "resume": "rebuild",
+            "updates": "manual"
+          }
+        }
+      },
+      "type": "object"
+    },
     "GatewayOAuthConfig": {
       "additionalProperties": false,
       "properties": {
@@ -1896,6 +1975,20 @@
           "description": "Legacy no-op setting retained for compatibility.",
           "format": "int64",
           "type": "integer"
+        }
+      },
+      "type": "object"
+    },
+    "GitAttributionConfig": {
+      "additionalProperties": false,
+      "properties": {
+        "commit_trailer": {
+          "default": "",
+          "type": "string"
+        },
+        "pr_footer": {
+          "default": "",
+          "type": "string"
         }
       },
       "type": "object"
@@ -2143,6 +2236,13 @@
         }
       ]
     },
+    "HookControl": {
+      "enum": [
+        "approved-only",
+        "off"
+      ],
+      "type": "string"
+    },
     "HookHandlerConfig": {
       "oneOf": [
         {
@@ -2360,6 +2460,34 @@
       },
       "type": "object"
     },
+    "InstructionConfig": {
+      "additionalProperties": false,
+      "properties": {
+        "resume": {
+          "allOf": [
+            {
+              "$ref": "#/definitions/ResumeInstructions"
+            }
+          ],
+          "default": "rebuild"
+        },
+        "updates": {
+          "allOf": [
+            {
+              "$ref": "#/definitions/InstructionUpdates"
+            }
+          ],
+          "default": "manual"
+        }
+      },
+      "type": "object"
+    },
+    "InstructionUpdates": {
+      "enum": [
+        "manual"
+      ],
+      "type": "string"
+    },
     "KeybindingsSpec": {
       "anyOf": [
         {
@@ -2375,6 +2503,13 @@
       "description": "One action binding value in config.\n\nThis accepts either:\n\n1. A single key or chord string (`\"ctrl-a\"` or `\"ctrl-x ctrl-s\"`). 2. A list of alternative bindings (`[\"ctrl-a\", \"ctrl-x ctrl-s\"]`).\n\nAn empty list explicitly unbinds the action in that scope. Because an explicit empty list is still a configured value, runtime resolution must not fall through to global or built-in defaults for that action."
     },
     "LegacyAppPathString": {
+      "type": "string"
+    },
+    "ManagedRequirements": {
+      "enum": [
+        "local-only",
+        "approved-sources"
+      ],
       "type": "string"
     },
     "MarketplaceConfig": {
@@ -4149,6 +4284,12 @@
           "type": "string"
         }
       ]
+    },
+    "ResumeInstructions": {
+      "enum": [
+        "rebuild"
+      ],
+      "type": "string"
     },
     "RightClickPaste": {
       "description": "Right-click text paste when the fullscreen TUI has no selection.",
@@ -7673,6 +7814,28 @@
       ],
       "default": null,
       "description": "When set, restricts the login mechanism users may use."
+    },
+    "fork": {
+      "allOf": [
+        {
+          "$ref": "#/definitions/ForkConfig"
+        }
+      ],
+      "default": {
+        "controls": {
+          "dangerous_commands": "confirm",
+          "hooks": "approved-only",
+          "managed_requirements": "local-only"
+        },
+        "git_attribution": {
+          "commit_trailer": "",
+          "pr_footer": ""
+        },
+        "instructions": {
+          "resume": "rebuild",
+          "updates": "manual"
+        }
+      }
     },
     "ghost_snapshot": {
       "allOf": [

@@ -122,17 +122,26 @@ async fn capture(args: CaptureArgs) -> Result<()> {
     let mut plugin_input = config.plugins_config_input();
     plugin_input.remote_plugin_enabled = false;
     let plugins = plugins_manager.plugins_for_config(&plugin_input).await;
-    if let Some(plugin) = plugins
+    let mut plugin_diagnostics = Vec::new();
+    for plugin in plugins
         .plugins()
         .iter()
-        .find(|plugin| plugin.enabled && plugin.error.is_some())
+        .filter(|plugin| plugin.enabled && plugin.error.is_some())
     {
-        bail!(
-            "enabled plugin {} could not be loaded: {}",
+        let error = plugin.error.as_deref().unwrap_or_default();
+        eprintln!(
+            "Warning: enabled plugin {} at {} is unavailable and excluded from the effective capture inventory: {}",
             plugin.config_name,
-            plugin.error.as_deref().unwrap_or_default()
+            plugin.root.display(),
+            error,
         );
+        plugin_diagnostics.push(serde_json::json!({
+            "plugin": plugin.config_name,
+            "root": plugin.root.to_string_lossy(),
+            "error": error,
+        }));
     }
+    plugin_diagnostics.sort_by_cached_key(serde_json::Value::to_string);
     let service = codex_skills_extension::HostSkillsService::new(
         config.codex_home.clone(),
         config.bundled_skills_enabled(),
@@ -149,7 +158,7 @@ async fn capture(args: CaptureArgs) -> Result<()> {
             if source.kind == SourceKind::Builtin
                 && matches!(
                     source.logical_id.as_str(),
-                    "instruction-settings" | "global-agents-home"
+                    "instruction-settings" | "global-agents-home" | "capture-plugin-diagnostics"
                 )
             {
                 return false;
@@ -177,6 +186,20 @@ async fn capture(args: CaptureArgs) -> Result<()> {
         .map(|source| ((source.kind.clone(), source.logical_id.clone()), source))
         .collect::<BTreeMap<_, _>>();
     extend_sources(&mut sources, vec![instruction_settings])?;
+    if !plugin_diagnostics.is_empty() {
+        extend_sources(
+            &mut sources,
+            vec![PolicySource::new(
+                SourceKind::Builtin,
+                "capture-plugin-diagnostics",
+                serde_json::to_string_pretty(&serde_json::json!({
+                    "schema_version": 1,
+                    "inventory": "effective_available_plugins",
+                    "excluded_unavailable_plugins": plugin_diagnostics,
+                }))?,
+            )],
+        )?;
+    }
     extend_sources(
         &mut sources,
         codex_skills_extension::capture_instruction_sources(&service, &skill_input)

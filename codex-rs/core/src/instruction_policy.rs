@@ -340,6 +340,15 @@ mod tests {
     use super::*;
     use codex_instruction_control::ForkConfig;
 
+    fn empty_prompt() -> Prompt {
+        Prompt {
+            base_instructions: codex_protocol::models::BaseInstructions {
+                text: String::new(),
+            },
+            ..Default::default()
+        }
+    }
+
     fn snapshot(sources: Vec<PolicySource>) -> PolicySnapshot {
         let mut base = vec![
             PolicySource::new(SourceKind::MainPrompt, "main", "instructions".into()),
@@ -422,7 +431,7 @@ mod tests {
                 execution: "client".to_string(),
                 tools: vec![tool],
             }],
-            ..Default::default()
+            ..empty_prompt()
         };
         let captured = capture_prompt_sources(&prompt).unwrap();
         assert_eq!(captured.len(), 1);
@@ -442,7 +451,7 @@ mod tests {
                     serde_json::json!({"type":"web_search","external_web_access":false}),
                 ],
             }],
-            ..Default::default()
+            ..empty_prompt()
         };
         let captured = capture_prompt_sources(&prompt).unwrap();
         assert_eq!(captured.len(), 2);
@@ -473,7 +482,7 @@ mod tests {
             .await
             .unwrap();
         config.instruction_snapshot = Some(std::sync::Arc::new(snapshot(Vec::new())));
-        assert!(verify_prompt(&config, &Prompt::default()).is_err());
+        assert!(verify_prompt(&config, &empty_prompt()).is_err());
         let mut sources = snapshot(Vec::new()).sources;
         sources
             .iter_mut()
@@ -485,7 +494,7 @@ mod tests {
         config.instruction_snapshot = Some(std::sync::Arc::new(
             PolicySnapshot::new(ForkConfig::default(), sources).unwrap(),
         ));
-        assert!(verify_prompt(&config, &Prompt::default()).is_ok());
+        assert!(verify_prompt(&config, &empty_prompt()).is_ok());
     }
 
     #[tokio::test]
@@ -554,7 +563,7 @@ mod tests {
             output_schema: Some(
                 serde_json::json!({"type":"object", "description":"Approved response instructions"}),
             ),
-            ..Default::default()
+            ..empty_prompt()
         };
         let original = capture_prompt_sources(&prompt).unwrap();
         assert_eq!(original.len(), 1);

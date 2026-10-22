@@ -20,7 +20,8 @@ Preparation and inspection need no administrative rights and never accept instru
 
 ```powershell
 .\codex-policy-manager.exe prepare --main .\main.md --catalog .\models.json --output .\candidate.json
-.\codex-policy-manager.exe inspect --candidate .\candidate.json
+.\codex.exe instructions capture --candidate .\candidate.json --output .\candidate-captured.json --cwd C:\project
+.\codex-policy-manager.exe inspect --candidate .\candidate-captured.json
 ```
 
 An optional `--controls controls.json` accepts a `ForkConfig` object. Omitting it uses manual updates, rebuilt resume instructions, dangerous-command confirmation, local-only managed requirements, approved-only hooks, and **empty** Git commit trailer and PR footer.
@@ -31,7 +32,7 @@ Additional sources use `--source KIND=LOGICAL_ID=FILE`. For file packages, use t
 .\codex-policy-manager.exe extend --candidate .\candidate.json --source 'skill=C:/skills/example/SKILL.md=C:/skills/example/SKILL.md' --source 'skill-asset=C:/skills/example/scripts/run.py=C:/skills/example/scripts/run.py' --output .\candidate-next.json
 ```
 
-The main client also provides its own candidate collector so it can capture the complete effective source inventory. Unknown, changed, or newly supplied instructions must pass the client request gate before use.
+The main client's `capture` step is required to collect instruction settings, AGENTS.md, enabled skill and plugin files, hook declarations, rendered fragments, and available tool schemas. Its extension registry does not yet reproduce every app-server extension, so additional tool schemas can still require first-use review. Unknown, changed, or newly supplied instructions must pass the client request gate before use. See [the workflow and audit](../../INSTRUCTION_CONTROL.md) for discovery limits and remote-environment imports.
 
 ## Initial installation
 
@@ -46,7 +47,7 @@ Keep these files together in the distribution:
 - `codex-command-runner.exe`
 
 ```powershell
-.\codex-policy-manager.exe install --distribution . --candidate .\candidate.json
+.\codex-policy-manager.exe install --distribution . --candidate .\candidate-captured.json
 ```
 
 The manager requests Windows elevation with `runas`. The elevated manager then opens its own native review window, displaying the binary hashes and complete previous/candidate instruction content. Acceptance requires its **Accept this version** button; no `--yes` or command-line auto-approval exists. Cancelling changes no accepted state. Initial bootstrap requires trusting the downloaded installer and confirming the genuine Windows UAC prompt, as with other installers.
@@ -66,6 +67,7 @@ Run the installed manager's `verify` command without elevation after installatio
 An unelevated invocation verifies and launches the **installed protected manager**, which requests UAC and shows the exact old/new review. The manager archives the accepted snapshot, materializes protected source copies, and replaces `active.json` atomically. Concurrent changes during review cause an error requiring another review. Existing processes keep their pinned snapshot; restart Codex to load the newly accepted one.
 
 The `install` command currently refuses an existing installation instead of partially replacing running binaries. Binary upgrades need a separate reviewed installation workflow; `apply` changes instruction snapshots only.
+An interrupted initial installation can leave a protected partial directory; automatic rollback and repair are not implemented. Concurrent `apply` invocations are serialized by an exclusive protected file lock; a competing manager receives a busy error.
 
 ## Checks
 

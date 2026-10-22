@@ -56,17 +56,22 @@ jobs:
       - name: Test instruction verification and session reconstruction
         if: ${{ !cancelled() }}
         run: |
-          cargo test --locked -p codex-core --lib instruction_policy:: -- --test-threads=1
-          cargo test --locked -p codex-core --lib removed_reviewer_metadata_does_not_leak_and_preserves_normal_request_metadata -- --test-threads=1
-          cargo test --locked -p codex-core --lib resume_instructions -- --test-threads=1
-          cargo test --locked -p codex-core --lib instruction_context -- --test-threads=1
-          cargo test --locked -p codex-core --lib backend_results_preserve_their_text_without_developer_role_escalation -- --test-threads=1
-          cargo test --locked -p codex-core --lib realtime_templates_require_approval_while_user_and_assistant_items_remain_data -- --test-threads=1
-          cargo test --locked -p codex-core --lib config::protected_managed -- --test-threads=1
-          cargo test --locked -p codex-core --lib config::instruction_settings -- --test-threads=1
-          cargo test --locked -p codex-core --lib config::runtime_refresh -- --test-threads=1
-          cargo test --locked -p codex-core --lib agents_md_tests:: -- --test-threads=1
-          cargo test --locked -p codex-core --lib exec_policy -- --test-threads=1
+          result=0
+          for filter in \
+            instruction_policy:: \
+            removed_reviewer_metadata_does_not_leak_and_preserves_normal_request_metadata \
+            resume_instructions \
+            instruction_context \
+            backend_results_preserve_their_text_without_developer_role_escalation \
+            realtime_templates_require_approval_while_user_and_assistant_items_remain_data \
+            config::protected_managed \
+            config::instruction_settings \
+            config::runtime_refresh \
+            agents_md_tests:: \
+            exec_policy; do
+            cargo test --locked -p codex-core --lib "$filter" -- --test-threads=1 || result=1
+          done
+          exit "$result"
       - name: Test protected backend routing
         if: ${{ !cancelled() }}
         run: |
