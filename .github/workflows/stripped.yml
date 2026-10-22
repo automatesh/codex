@@ -4,6 +4,11 @@ on:
   push:
     branches: [stripped-0.163.0]
   workflow_dispatch:
+    inputs:
+      prefix_only:
+        description: Run only the model independent prefix regression
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -17,6 +22,7 @@ jobs:
       CARGO_PROFILE_TEST_DEBUG: "0"
       CARGO_INCREMENTAL: "0"
       CARGO_BUILD_JOBS: "2"
+      RUST_MIN_STACK: "8388608"
     defaults:
       run:
         working-directory: codex-rs
@@ -32,29 +38,32 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y libcap-dev libssl-dev pkg-config clang
       - name: Check changed crate formatting
+        if: ${{ inputs.prefix_only != true }}
         run: cargo fmt -p codex-analytics -p codex-feedback -p codex-otel -p codex-http-client -p codex-core -p codex-app-server -p codex-cli -p codex-instruction-control -p codex-home -p codex-hooks -p codex-skills-extension -p codex-git-attribution -p codex-config -p codex-history -- --check
       - name: Check full CLI without Guardian or OpenTelemetry
+        if: ${{ inputs.prefix_only != true }}
         run: cargo check --locked -p codex-cli
       - name: Test telemetry removal and retained local diagnostics
+        if: ${{ inputs.prefix_only != true }}
         run: cargo test --locked -p codex-analytics -p codex-feedback -p codex-otel -- --test-threads=1
       - name: Diagnose HTTP test environment
-        if: ${{ !cancelled() }}
+        if: ${{ !cancelled() && inputs.prefix_only != true }}
         run: |
           for key in CODEX_CA_CERTIFICATE SSL_CERT_FILE; do
             if [[ -v "$key" ]]; then echo "$key=set"; else echo "$key=unset"; fi
           done
           cargo tree --locked -p codex-http-client -e features -i reqwest@0.12.28
       - name: Test HTTP client independently
-        if: ${{ !cancelled() }}
+        if: ${{ !cancelled() && inputs.prefix_only != true }}
         run: cargo test --locked -p codex-http-client -- --test-threads=1
       - name: Test configuration and metadata boundaries
-        if: ${{ !cancelled() }}
+        if: ${{ !cancelled() && inputs.prefix_only != true }}
         run: cargo test --locked -p codex-core --test stripped_config -- --test-threads=1
       - name: Test accepted instruction sources and local attribution
-        if: ${{ !cancelled() }}
+        if: ${{ !cancelled() && inputs.prefix_only != true }}
         run: cargo test --locked -p codex-instruction-control -p codex-home -p codex-hooks -p codex-skills-extension -p codex-git-attribution -- --test-threads=1
       - name: Test instruction verification and session reconstruction
-        if: ${{ !cancelled() }}
+        if: ${{ !cancelled() && inputs.prefix_only != true }}
         run: |
           result=0
           for filter in \
@@ -73,7 +82,7 @@ jobs:
           done
           exit "$result"
       - name: Test protected backend routing
-        if: ${{ !cancelled() }}
+        if: ${{ !cancelled() && inputs.prefix_only != true }}
         run: |
           cargo test --locked -p codex-cli --bin codex protected_backend_routes -- --test-threads=1
           cargo test --locked -p codex-tui --lib protected_launch_ -- --test-threads=1
@@ -81,15 +90,16 @@ jobs:
         if: ${{ !cancelled() }}
         run: cargo test --locked -p codex-core --test all prefix_rules_model_independence -- --test-threads=1
       - name: Build coding and research CLI
-        if: ${{ !cancelled() }}
+        if: ${{ !cancelled() && inputs.prefix_only != true }}
         run: cargo build --locked -p codex-cli --bin codex
       - name: Check CLI startup
-        if: ${{ !cancelled() }}
+        if: ${{ !cancelled() && inputs.prefix_only != true }}
         run: |
           target/debug/codex --version
           target/debug/codex exec --help
 
   windows-build:
+    if: ${{ inputs.prefix_only != true }}
     runs-on: windows-latest
     timeout-minutes: 90
     env:
