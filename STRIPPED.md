@@ -51,8 +51,9 @@ Building does not install it or change an existing Codex installation.
 ```sh
 cd codex-rs
 cargo check --locked -p codex-cli
-cargo test --locked -p codex-analytics -p codex-feedback -p codex-otel -p codex-http-client
-cargo test --locked -p codex-core stripped_telemetry_cannot_be_enabled
+cargo test --locked -p codex-analytics -p codex-feedback -p codex-otel -- --test-threads=1
+cargo test --locked -p codex-http-client -- --test-threads=1
+cargo test --locked -p codex-core --lib stripped_ -- --test-threads=1
 ```
 
 Transport regression tests cover explicit exporter configuration, analytics opt-in,

@@ -34,10 +34,22 @@ jobs:
       - name: Check changed crate formatting
         run: cargo fmt -p codex-analytics -p codex-feedback -p codex-otel -p codex-http-client -p codex-core -p codex-app-server -- --check
       - name: Test telemetry removal and retained local diagnostics
-        run: cargo test --locked -p codex-analytics -p codex-feedback -p codex-otel -p codex-http-client -- --test-threads=1
+        run: cargo test --locked -p codex-analytics -p codex-feedback -p codex-otel -- --test-threads=1
+      - name: Diagnose HTTP test environment
+        if: ${{ !cancelled() }}
+        run: |
+          for key in CODEX_CA_CERTIFICATE SSL_CERT_FILE; do
+            if [[ -v "$key" ]]; then echo "$key=set"; else echo "$key=unset"; fi
+          done
+          cargo tree --locked -p codex-http-client -e features -i reqwest@0.12.28
+      - name: Test HTTP client independently
+        if: ${{ !cancelled() }}
+        run: cargo test --locked -p codex-http-client -- --test-threads=1
       - name: Test configuration and metadata boundaries
+        if: ${{ !cancelled() }}
         run: cargo test --locked -p codex-core --lib stripped_ -- --test-threads=1
       - name: Build coding and research CLI
+        if: ${{ !cancelled() }}
         run: cargo build --locked -p codex-cli --bin codex
       - name: Check CLI startup
         run: |

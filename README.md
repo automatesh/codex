@@ -1,4 +1,5 @@
 > **Codex stripped fork:** see [STRIPPED.md](STRIPPED.md) for changes, retained features, and build instructions.
+> Build this fork from source. The upstream npm package and release downloads do not contain these changes.
 
 <p align="center"><strong>Codex CLI</strong> is a coding agent from OpenAI that runs locally on your computer.
 <p align="center">
