@@ -158,7 +158,7 @@ fn replace_with_rollback(
 }
 
 fn validate_preserved_snapshot(root: &Path, expected: &PolicySnapshot) -> Result<()> {
-    let active = root.join("Policy/active.json");
+    let active = root.join("Policy").join("active.json");
     verify_acl(&active)?;
     if read_candidate(&active)? != *expected {
         bail!("accepted instructions changed during binary upgrade");
