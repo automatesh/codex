@@ -64,7 +64,7 @@ fn canonical_source_paths(text: &str, root: &str, active_id: &str) -> String {
             let boundary = start == 0
                 || matches!(
                     bytes[start - 1],
-                    b' ' | b'\n' | b'\r' | b'\t' | b'"' | b'\'' | b'<' | b'('
+                    b' ' | b'\n' | b'\r' | b'\t' | b'"' | b'\'' | b'`' | b'<' | b'('
                 );
             if boundary
                 && bytes
@@ -403,6 +403,28 @@ mod tests {
         let unicode =
             "\u{0418}\u{043d}\u{0441}\u{0442}\u{0440}\u{0443}\u{043a}\u{0446}\u{0438}\u{044f}";
         assert_eq!(canonical_source_paths(unicode, root, &digest), unicode);
+    }
+
+    #[test]
+    fn canonicalization_keeps_markdown_skill_paths_stable_after_snapshot_acceptance() {
+        let root = r"C:\Program Files\CodexStripped\Policy\sources";
+        let previous = "a".repeat(64);
+        let next = "b".repeat(64);
+        for prefix in [
+            format!("{}/", root.replace('\\', "/")),
+            format!("{root}\\"),
+            format!("{}\\\\", root.replace('\\', "\\\\")),
+        ] {
+            let catalog = format!("- `r0` = `{prefix}{previous}/tree/skills`\n");
+            let relocated = catalog.replace(&previous, &next);
+            let accepted = canonical_source_paths(&catalog, root, &previous);
+            assert!(accepted.contains("ACCEPTED_SNAPSHOT"));
+            assert_eq!(accepted, canonical_source_paths(&relocated, root, &next));
+            assert_ne!(
+                accepted,
+                canonical_source_paths(&format!("{relocated}Changed instructions"), root, &next)
+            );
+        }
     }
 
     #[test]
