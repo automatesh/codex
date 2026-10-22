@@ -7,6 +7,7 @@ use windows_sys::Win32::Foundation::LPARAM;
 use windows_sys::Win32::Foundation::LRESULT;
 use windows_sys::Win32::Foundation::WPARAM;
 use windows_sys::Win32::System::LibraryLoader::GetModuleHandleW;
+use windows_sys::Win32::UI::Input::KeyboardAndMouse::EnableWindow;
 use windows_sys::Win32::UI::WindowsAndMessaging::*;
 
 struct State {
@@ -159,7 +160,7 @@ pub(super) fn review(title: &str, text: &str) -> Result<()> {
             0,
             button_class.as_ptr(),
             accept.as_ptr(),
-            WS_CHILD | WS_VISIBLE | WS_TABSTOP | BS_PUSHBUTTON as u32,
+            WS_CHILD | WS_VISIBLE | WS_TABSTOP | WS_DISABLED | BS_PUSHBUTTON as u32,
             760,
             700,
             144,
@@ -203,6 +204,7 @@ pub(super) fn review(title: &str, text: &str) -> Result<()> {
             DestroyWindow(window);
             bail!("review control truncated candidate text; refusing acceptance");
         }
+        EnableWindow(state.accept, 1);
         ShowWindow(window, SW_SHOW);
         SetForegroundWindow(window);
     }
