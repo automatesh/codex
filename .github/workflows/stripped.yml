@@ -1,0 +1,45 @@
+name: stripped
+
+on:
+  push:
+    branches: [stripped-0.163.0]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    env:
+      CARGO_PROFILE_DEV_DEBUG: "0"
+      CARGO_PROFILE_TEST_DEBUG: "0"
+      CARGO_INCREMENTAL: "0"
+      CARGO_BUILD_JOBS: "2"
+    defaults:
+      run:
+        working-directory: codex-rs
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@e081816240890017053eacbb1bdf337761dc5582
+        with:
+          components: rustfmt
+      - name: Install native build prerequisites
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libcap-dev libssl-dev pkg-config clang
+      - name: Check changed crate formatting
+        run: cargo fmt -p codex-analytics -p codex-feedback -p codex-otel -p codex-http-client -p codex-core -p codex-app-server -- --check
+      - name: Test telemetry removal and retained local diagnostics
+        run: cargo test --locked -p codex-analytics -p codex-feedback -p codex-otel -p codex-http-client -- --test-threads=1
+      - name: Test configuration and metadata boundaries
+        run: cargo test --locked -p codex-core --lib stripped_ -- --test-threads=1
+      - name: Build coding and research CLI
+        run: cargo build --locked -p codex-cli --bin codex
+      - name: Check CLI startup
+        run: |
+          target/debug/codex --version
+          target/debug/codex exec --help

@@ -1,4 +1,5 @@
-//! Buffers bounded operation counts and durations until process metrics are configured.
+//! Supports local operation metrics only after an in-memory client is explicitly installed.
+//! The process-global buffer starts disabled in this fork.
 //! Each pair is admitted together; lifecycle transitions serialize with local SDK recording.
 //! Shutting down the active installation resumes buffering until its replacement is ready.
 
@@ -33,7 +34,9 @@ pub(crate) struct BufferedMetrics {
     state: Mutex<State>,
 }
 
-pub(crate) static GLOBAL: BufferedMetrics = BufferedMetrics::new();
+pub(crate) static GLOBAL: BufferedMetrics = BufferedMetrics {
+    state: Mutex::new(State::Disabled),
+};
 
 /// Records one operation count and its duration in milliseconds through `MetricsClient`.
 /// While awaiting an active provider, retains at most 256 pairs, each with at most 16 tags and
@@ -50,6 +53,7 @@ pub fn record_global_operation(
 }
 
 impl BufferedMetrics {
+    #[cfg(test)]
     const fn new() -> Self {
         Self {
             state: Mutex::new(State::Startup(Vec::new())),
@@ -139,6 +143,7 @@ impl BufferedMetrics {
         *state = State::Ready(metrics);
     }
 
+    #[cfg(test)]
     pub(crate) fn disable(&self) {
         *self
             .state

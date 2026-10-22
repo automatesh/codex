@@ -1,5 +1,3 @@
-use crate::config::OtelExporter;
-use crate::config::OtelHttpProtocol;
 use crate::metrics::MetricsError;
 use crate::metrics::Result;
 use crate::metrics::config::MetricsConfig;
@@ -16,13 +14,6 @@ use opentelemetry::metrics::Gauge;
 use opentelemetry::metrics::Histogram;
 use opentelemetry::metrics::Meter;
 use opentelemetry::metrics::MeterProvider as _;
-use opentelemetry_otlp::OTEL_EXPORTER_OTLP_METRICS_TIMEOUT;
-use opentelemetry_otlp::Protocol;
-use opentelemetry_otlp::WithExportConfig;
-use opentelemetry_otlp::WithHttpConfig;
-use opentelemetry_otlp::WithTonicConfig;
-use opentelemetry_otlp::tonic_types::metadata::MetadataMap;
-use opentelemetry_otlp::tonic_types::transport::ClientTlsConfig;
 use opentelemetry_sdk::Resource;
 use opentelemetry_sdk::metrics::InstrumentKind;
 use opentelemetry_sdk::metrics::ManualReader;
@@ -101,7 +92,6 @@ impl MetricReader for SharedManualReader {
 
 #[derive(Debug)]
 pub(super) struct MetricsClientInner {
-    pub(super) network_policy: codex_http_client::NetworkPolicy,
     meter_provider: SdkMeterProvider,
     meter: Meter,
     counters: Mutex<HashMap<InstrumentKey, Counter<u64>>>,
@@ -323,8 +313,11 @@ pub struct MetricsClient {
 impl MetricsClient {
     /// Build a metrics client from configuration and validate defaults.
     pub fn new(config: MetricsConfig) -> Result<Self> {
+        if matches!(config.exporter, MetricsExporter::Otlp(_)) {
+            return Err(MetricsError::ExporterDisabled);
+        }
         let MetricsConfig {
-            http_client_factory,
+            http_client_factory: _,
             environment,
             service_name,
             service_version,
@@ -362,28 +355,11 @@ impl MetricsClient {
             MetricsExporter::InMemory(exporter) => {
                 build_provider(resource, exporter, export_interval, runtime_reader.clone())
             }
-            MetricsExporter::Otlp(exporter) => {
-                let temporality = otlp_metrics_temporality(
-                    &exporter,
-                    std::env::var("OTEL_EXPORTER_OTLP_METRICS_TEMPORALITY_PREFERENCE")
-                        .ok()
-                        .as_deref(),
-                );
-                let exporter = crate::network_policy::PolicyExporter {
-                    exporter: build_otlp_metric_exporter(
-                        exporter,
-                        temporality,
-                        &http_client_factory,
-                    )?,
-                    policy: http_client_factory.network_policy().clone(),
-                };
-                build_provider(resource, exporter, export_interval, runtime_reader.clone())
-            }
+            MetricsExporter::Otlp(_) => return Err(MetricsError::ExporterDisabled),
         };
 
         Ok(Self {
             inner: Arc::new(MetricsClientInner {
-                network_policy: http_client_factory.network_policy().clone(),
                 meter_provider,
                 meter,
                 counters: Mutex::new(HashMap::new()),
@@ -593,105 +569,4 @@ where
     let provider = provider_builder.with_reader(reader).build();
     let meter = provider.meter(METER_NAME);
     (provider, meter)
-}
-
-fn otlp_metrics_temporality(exporter: &OtelExporter, preference: Option<&str>) -> Temporality {
-    // Select before resolving Statsig to OTLP so its built-in route stays Delta.
-    match exporter {
-        OtelExporter::None | OtelExporter::Statsig => Temporality::Delta,
-        OtelExporter::OtlpGrpc { .. } | OtelExporter::OtlpHttp { .. } => match preference {
-            Some(value) if value.eq_ignore_ascii_case("cumulative") => Temporality::Cumulative,
-            Some(value) if value.eq_ignore_ascii_case("lowmemory") => Temporality::LowMemory,
-            // Preserve Codex's existing default for unset, empty, or unknown values.
-            _ => Temporality::Delta,
-        },
-    }
-}
-
-fn build_otlp_metric_exporter(
-    exporter: OtelExporter,
-    temporality: Temporality,
-    factory: &codex_http_client::HttpClientFactory,
-) -> Result<opentelemetry_otlp::MetricExporter> {
-    match exporter {
-        OtelExporter::None => Err(MetricsError::ExporterDisabled),
-        OtelExporter::Statsig => build_otlp_metric_exporter(
-            crate::config::resolve_exporter(&OtelExporter::Statsig),
-            temporality,
-            factory,
-        ),
-        OtelExporter::OtlpGrpc {
-            endpoint,
-            headers,
-            tls,
-        } => {
-            debug!("Using OTLP Grpc exporter for metrics: {endpoint}");
-
-            let header_map = crate::otlp::build_header_map(&headers);
-
-            let base_tls_config = ClientTlsConfig::new()
-                .with_enabled_roots()
-                .assume_http2(true);
-
-            let tls_config = match tls.as_ref() {
-                Some(tls) => crate::otlp::build_grpc_tls_config(&endpoint, base_tls_config, tls)
-                    .map_err(|err| MetricsError::InvalidConfig {
-                        message: err.to_string(),
-                    })?,
-                None => base_tls_config,
-            };
-
-            opentelemetry_otlp::MetricExporter::builder()
-                .with_tonic()
-                .with_endpoint(endpoint)
-                .with_temporality(temporality)
-                .with_metadata(MetadataMap::from_headers(header_map))
-                .with_tls_config(tls_config)
-                .build()
-                .map_err(|source| MetricsError::ExporterBuild { source })
-        }
-        OtelExporter::OtlpHttp {
-            endpoint,
-            headers,
-            protocol,
-            tls,
-        } => {
-            debug!("Using OTLP Http exporter for metrics: {endpoint}");
-
-            let protocol = match protocol {
-                OtelHttpProtocol::Binary => Protocol::HttpBinary,
-                OtelHttpProtocol::Json => Protocol::HttpJson,
-            };
-
-            let mut exporter_builder = opentelemetry_otlp::MetricExporter::builder()
-                .with_http()
-                .with_endpoint(endpoint)
-                .with_temporality(temporality)
-                .with_protocol(protocol)
-                .with_headers(headers);
-
-            if factory.network_policy().is_managed() {
-                let client = crate::otlp::build_async_http_client(
-                    factory,
-                    tls.as_ref(),
-                    OTEL_EXPORTER_OTLP_METRICS_TIMEOUT,
-                )
-                .map_err(|err| MetricsError::InvalidConfig {
-                    message: err.to_string(),
-                })?;
-                exporter_builder = exporter_builder.with_http_client(client);
-            } else if let Some(tls) = tls.as_ref() {
-                let client =
-                    crate::otlp::build_http_client(tls, OTEL_EXPORTER_OTLP_METRICS_TIMEOUT)
-                        .map_err(|err| MetricsError::InvalidConfig {
-                            message: err.to_string(),
-                        })?;
-                exporter_builder = exporter_builder.with_http_client(client);
-            }
-
-            exporter_builder
-                .build()
-                .map_err(|source| MetricsError::ExporterBuild { source })
-        }
-    }
 }

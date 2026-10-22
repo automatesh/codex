@@ -7,8 +7,6 @@ pub(crate) mod trace_context;
 
 mod agent_response;
 mod guardian_assessment;
-mod network_policy;
-mod otlp;
 mod skill_invocation;
 mod targets;
 mod tool_result;

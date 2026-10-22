@@ -1,11 +1,13 @@
+// Event schemas remain for upstream API compatibility; collection is removed.
+#![cfg_attr(not(test), allow(dead_code))]
+
 mod accepted_lines;
-#[cfg(debug_assertions)]
-mod analytics_capture;
 mod client;
 mod events;
 mod facts;
 mod guardian_v2;
 mod product_attribution;
+#[cfg(test)]
 mod reducer;
 mod thread_hint;
 

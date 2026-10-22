@@ -6446,22 +6446,23 @@ fn local_dev_builds_force_file_mcp_oauth_store_modes() {
 }
 
 #[tokio::test]
-async fn feedback_enabled_defaults_to_true() -> std::io::Result<()> {
+async fn stripped_telemetry_cannot_be_enabled() -> std::io::Result<()> {
     let codex_home = TempDir::new()?;
-    let cfg = ConfigToml {
-        feedback: Some(FeedbackConfigToml::default()),
-        ..Default::default()
-    };
-
-    let config = Config::load_from_base_config_with_overrides(
-        cfg,
-        ConfigOverrides::default(),
-        codex_home.abs(),
-    )
-    .await?;
-
-    assert_eq!(config.feedback_enabled, true);
-
+    for enabled in [None, Some(false), Some(true)] {
+        let cfg = ConfigToml {
+            feedback: Some(FeedbackConfigToml { enabled }),
+            analytics: Some(codex_config::types::AnalyticsConfigToml { enabled }),
+            ..Default::default()
+        };
+        let config = Config::load_from_base_config_with_overrides(
+            cfg,
+            ConfigOverrides::default(),
+            codex_home.abs(),
+        )
+        .await?;
+        assert!(!config.feedback_enabled);
+        assert_eq!(config.analytics_enabled, Some(false));
+    }
     Ok(())
 }
 

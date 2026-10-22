@@ -1,6 +1,5 @@
 //! Plugin lifecycle, usage, measurements, and event deduplication tests.
 
-use crate::client::AnalyticsEventsQueue;
 use crate::events::CodexPluginEventRequest;
 use crate::events::CodexPluginInstallFailedEventRequest;
 use crate::events::CodexPluginInstallFailedMetadata;
@@ -30,10 +29,6 @@ use codex_plugin::PluginTelemetryMetadata;
 use pretty_assertions::assert_eq;
 use serde_json::json;
 use std::collections::BTreeMap;
-use std::collections::HashSet;
-use std::sync::Arc;
-use std::sync::Mutex;
-use tokio::sync::mpsc;
 
 fn plugin_measurements(rows: Vec<PluginMeasurementRow>) -> PluginMeasurementsInput {
     PluginMeasurementsInput {
@@ -279,25 +274,6 @@ fn plugin_management_event_keeps_plugin_id_local_when_remote_id_exists() {
             }
         })
     );
-}
-
-#[test]
-fn plugin_used_dedupe_is_keyed_by_turn_and_plugin() {
-    let (sender, _receiver) = mpsc::channel(1);
-    let queue = AnalyticsEventsQueue {
-        sender,
-        product_generation: Arc::new(std::sync::atomic::AtomicU64::new(0)),
-        app_used_emitted_keys: Arc::new(Mutex::new(HashSet::new())),
-        plugin_used_emitted_keys: Arc::new(Mutex::new(HashSet::new())),
-    };
-    let plugin = sample_plugin_metadata();
-
-    let turn_1 = test_tracking_context("thread-1", "turn-1");
-    let turn_2 = test_tracking_context("thread-1", "turn-2");
-
-    assert_eq!(queue.should_enqueue_plugin_used(&turn_1, &plugin), true);
-    assert_eq!(queue.should_enqueue_plugin_used(&turn_1, &plugin), false);
-    assert_eq!(queue.should_enqueue_plugin_used(&turn_2, &plugin), true);
 }
 
 #[tokio::test]
