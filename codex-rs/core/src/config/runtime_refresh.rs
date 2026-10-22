@@ -168,6 +168,7 @@ impl Config {
         }
         config.config_layer_stack = layers;
         config.plugins = cfg.plugins;
+        super::instruction_settings::apply_instruction_settings(&mut config)?;
         if enterprise_retired {
             config.disable_mcp_enterprise_auth();
         }

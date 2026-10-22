@@ -274,6 +274,37 @@ fn locked_file(path: &Path) -> Result<File> {
     Ok(file)
 }
 
+fn open_update_lock(path: &Path) -> Result<File> {
+    let file = std::fs::OpenOptions::new()
+        .read(true)
+        .write(true)
+        .share_mode(0)
+        .custom_flags(FILE_FLAG_OPEN_REPARSE_POINT)
+        .open(path)
+        .map_err(|error| match error.raw_os_error() {
+            Some(32 | 33) => anyhow::anyhow!(
+                "instruction update already in progress; another manager holds the policy lock"
+            ),
+            _ => anyhow::anyhow!(error).context(
+                "cannot open protected policy update lock; installation may be incomplete",
+            ),
+        })?;
+    let metadata = file.metadata()?;
+    if !metadata.is_file() || metadata.file_attributes() & FILE_ATTRIBUTE_REPARSE_POINT != 0 {
+        bail!("policy update lock is not an ordinary file");
+    }
+    Ok(file)
+}
+
+fn acquire_update_lock(root: &Path) -> Result<File> {
+    verify_acl(root)?;
+    let policy = root.join("Policy");
+    verify_acl(&policy)?;
+    let path = policy.join("update.lock");
+    verify_acl(&path)?;
+    open_update_lock(&path)
+}
+
 fn read_candidate(path: &Path) -> Result<PolicySnapshot> {
     let mut file = locked_file(path)?;
     let mut bytes = Vec::new();
@@ -528,6 +559,10 @@ fn ensure_directory(path: &Path) -> Result<()> {
 fn persist(root: &Path, snapshot: &PolicySnapshot) -> Result<()> {
     let policy = root.join("Policy");
     ensure_directory(&policy)?;
+    let lock = policy.join("update.lock");
+    if !lock.exists() {
+        write_new(&lock, b"")?;
+    }
     let source_root = policy.join("sources");
     ensure_directory(&source_root)?;
     let sources = source_root.join(&snapshot.snapshot_id);
@@ -620,6 +655,8 @@ pub fn apply(candidate: &Path) -> Result<()> {
     if std::env::current_exe()?.file_name() != Some(OsStr::new("codex-policy-manager.exe")) {
         bail!("only the protected manager can accept instructions");
     }
+    let root = install_dir()?;
+    let _update_lock = acquire_update_lock(&root)?;
     let previous = load_store()?;
     let review = crate::review_text(Some(&previous), &snapshot)?;
     review_ui::review("Accept instruction changes", &review)?;
@@ -628,7 +665,7 @@ pub fn apply(candidate: &Path) -> Result<()> {
             "accepted instructions changed during review; inspect and review the candidate again"
         );
     }
-    persist(&install_dir()?, &snapshot)?;
+    persist(&root, &snapshot)?;
     println!(
         "Accepted snapshot {}. Existing turns retain their previous snapshot.",
         snapshot.snapshot_id
@@ -686,7 +723,12 @@ pub fn install(distribution: &Path, candidate: &Path) -> Result<()> {
     );
     review_ui::review("Install protected Codex and instructions", &review)?;
     // All source files remain open without WRITE/DELETE sharing through review and copy.
-    std::fs::create_dir(&root)?;
+    std::fs::create_dir(&root).with_context(|| {
+        format!(
+            "cannot exclusively create installation {}; another installation may have started; existing directories are never reused",
+            root.display()
+        )
+    })?;
     protect(&root)?;
     for (name, mut input) in inputs {
         let destination = root.join(name);
@@ -741,5 +783,38 @@ mod tests {
         let _locked = locked_file(&path).unwrap();
         assert!(std::fs::write(&path, "replacement").is_err());
         assert!(std::fs::remove_file(&path).is_err());
+    }
+
+    #[test]
+    fn policy_update_lock_rejects_concurrent_manager_and_releases_on_drop() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("update.lock");
+        std::fs::write(&path, b"").unwrap();
+        let first = open_update_lock(&path).unwrap();
+        let error = open_update_lock(&path).unwrap_err();
+        assert!(
+            error
+                .to_string()
+                .contains("instruction update already in progress")
+        );
+        assert!(std::fs::remove_file(&path).is_err());
+        drop(first);
+        let second = open_update_lock(&path).unwrap();
+        drop(second);
+        assert_eq!(std::fs::read(&path).unwrap(), b"");
+    }
+
+    #[test]
+    fn exclusive_install_directory_creation_preserves_existing_state() {
+        let directory = tempfile::tempdir().unwrap();
+        let root = directory.path().join("CodexStripped");
+        std::fs::create_dir(&root).unwrap();
+        let accepted = root.join("accepted-fixture");
+        std::fs::write(&accepted, b"first installer").unwrap();
+        assert_eq!(
+            std::fs::create_dir(&root).unwrap_err().kind(),
+            std::io::ErrorKind::AlreadyExists
+        );
+        assert_eq!(std::fs::read(accepted).unwrap(), b"first installer");
     }
 }

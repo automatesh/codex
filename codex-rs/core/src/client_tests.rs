@@ -2282,3 +2282,27 @@ async fn inference_tools_changes_follow_full_specs_across_turns() {
         );
     }
 }
+
+#[test]
+fn removed_reviewer_metadata_does_not_leak_and_preserves_normal_request_metadata() {
+    let mut metadata = Some(std::collections::HashMap::from([
+        ("guardian_credits_requested".to_string(), "true".to_string()),
+        (
+            "parent_response_id".to_string(),
+            "review-parent".to_string(),
+        ),
+        ("parent_thread_id".to_string(), "normal-parent".to_string()),
+        ("turn_id".to_string(), "normal-turn".to_string()),
+    ]));
+    super::strip_obsolete_guardian_metadata(&mut metadata);
+    assert_eq!(
+        metadata.unwrap(),
+        std::collections::HashMap::from([
+            ("parent_thread_id".to_string(), "normal-parent".to_string()),
+            ("turn_id".to_string(), "normal-turn".to_string()),
+        ])
+    );
+    let mut absent = None;
+    super::strip_obsolete_guardian_metadata(&mut absent);
+    assert!(absent.is_none());
+}

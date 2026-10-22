@@ -136,7 +136,7 @@ async fn read_agents_md(
         return Ok(None);
     }
 
-    let paths = agents_md_paths(config, cwd, fs, sandbox).await?;
+    let paths = agents_md_paths(config, environment_id, cwd, fs, sandbox).await?;
     if paths.is_empty() {
         return Ok(None);
     }
@@ -150,7 +150,7 @@ async fn read_agents_md(
         }
 
         let mut data = if let Some(snapshot) = &config.instruction_snapshot {
-            let id = agents_source_id(&p);
+            let id = agents_source_id(environment_id, &p);
             let accepted = snapshot
                 .resolve(SourceKind::Agents, &id)
                 .map_err(|error| io::Error::other(error.to_string()))?;
@@ -208,6 +208,7 @@ async fn read_agents_md(
 #[tracing::instrument(name = "agents_md.discover", skip_all)]
 async fn agents_search_dirs(
     config: &Config,
+    environment_id: &str,
     cwd: &PathUri,
     fs: &dyn ExecutorFileSystem,
     sandbox: Option<&FileSystemSandboxContext>,
@@ -219,7 +220,10 @@ async fn agents_search_dirs(
         while let Some(directory) = cursor {
             dirs.push(directory.clone());
             if snapshot
-                .resolve(SourceKind::Builtin, &format!("agents-scope:{directory}"))
+                .resolve(
+                    SourceKind::Builtin,
+                    &format!("agents-scope:{environment_id}:{directory}"),
+                )
                 .is_ok()
             {
                 dirs.reverse();
@@ -229,7 +233,9 @@ async fn agents_search_dirs(
         }
         return Err(io::Error::new(
             io::ErrorKind::PermissionDenied,
-            "project instruction scope is not accepted; capture this working directory into a candidate and approve it",
+            format!(
+                "project instruction scope for environment `{environment_id}` is not accepted; capture and approve its working directory or import explicitly scoped project instruction sources"
+            ),
         ));
     }
 
@@ -276,19 +282,18 @@ async fn agents_search_dirs(
     })
 }
 
-fn agents_source_id(path: &PathUri) -> String {
-    path.to_abs_path()
-        .map(|path| path.to_string_lossy().to_string())
-        .unwrap_or_else(|_| path.to_string())
+fn agents_source_id(environment_id: &str, path: &PathUri) -> String {
+    format!("project:{environment_id}:{path}")
 }
 
 async fn agents_md_paths(
     config: &Config,
+    environment_id: &str,
     cwd: &PathUri,
     fs: &dyn ExecutorFileSystem,
     sandbox: Option<&FileSystemSandboxContext>,
 ) -> io::Result<Vec<PathUri>> {
-    let search_dirs = agents_search_dirs(config, cwd, fs, sandbox).await?;
+    let search_dirs = agents_search_dirs(config, environment_id, cwd, fs, sandbox).await?;
 
     let candidate_filenames = candidate_filenames(config, cwd);
     let candidate_filenames = &candidate_filenames;
@@ -299,7 +304,7 @@ async fn agents_md_paths(
                     .join(name)
                     .map_err(|err| io::Error::new(io::ErrorKind::InvalidInput, err))?;
                 if let Some(snapshot) = &config.instruction_snapshot {
-                    if snapshot.resolve(SourceKind::Agents, &agents_source_id(&candidate)).is_ok() {
+                    if snapshot.resolve(SourceKind::Agents, &agents_source_id(environment_id, &candidate)).is_ok() {
                         return Ok(Some(candidate));
                     }
                     if fs.get_metadata(&candidate, GetMetadataOptions::default(), sandbox).await
@@ -353,22 +358,37 @@ pub async fn capture_agents_sources(config: &Config) -> io::Result<Vec<PolicySou
         }
     }
     let cwd = PathUri::from_abs_path(&config.cwd);
-    let directories =
-        agents_search_dirs(config, &cwd, codex_exec_server::LOCAL_FS.as_ref(), None).await?;
+    let environment_id = codex_exec_server::LOCAL_ENVIRONMENT_ID;
+    let directories = agents_search_dirs(
+        config,
+        environment_id,
+        &cwd,
+        codex_exec_server::LOCAL_FS.as_ref(),
+        None,
+    )
+    .await?;
     if let Some(root) = directories.first() {
-        let id = format!("agents-scope:{root}");
+        let id = format!("agents-scope:{environment_id}:{root}");
         sources.insert(
             id.clone(),
             PolicySource::new(SourceKind::Builtin, id, root.to_string()),
         );
     }
-    for path in agents_md_paths(config, &cwd, codex_exec_server::LOCAL_FS.as_ref(), None).await? {
+    for path in agents_md_paths(
+        config,
+        environment_id,
+        &cwd,
+        codex_exec_server::LOCAL_FS.as_ref(),
+        None,
+    )
+    .await?
+    {
         let text = codex_exec_server::LOCAL_FS
             .read_file(&path, ReadFileOptions::default(), None)
             .await?;
         let text = String::from_utf8(text)
             .map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error))?;
-        let id = agents_source_id(&path);
+        let id = agents_source_id(environment_id, &path);
         sources.insert(id.clone(), PolicySource::new(SourceKind::Agents, id, text));
     }
     Ok(sources.into_values().collect())

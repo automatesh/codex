@@ -37,6 +37,9 @@ fn dynamic_state(kind: &str) -> bool {
 }
 
 fn canonical_content(text: &str) -> String {
+    let Some(snapshot) = codex_instruction_control::runtime_snapshot() else {
+        return text.to_owned();
+    };
     let Ok(root) = codex_instruction_control::protected_install_dir() else {
         return text.to_owned();
     };
@@ -45,10 +48,10 @@ fn canonical_content(text: &str) -> String {
         .join("sources")
         .to_string_lossy()
         .to_string();
-    canonical_source_paths(text, &root)
+    canonical_source_paths(text, &root, &snapshot.snapshot_id)
 }
 
-fn canonical_source_paths(text: &str, root: &str) -> String {
+fn canonical_source_paths(text: &str, root: &str, active_id: &str) -> String {
     let mut result = text.to_owned();
     let native = format!("{root}\\");
     let forward = format!("{}/", root.replace('\\', "/"));
@@ -66,7 +69,7 @@ fn canonical_source_paths(text: &str, root: &str) -> String {
             if boundary
                 && bytes
                     .get(index..index + 64)
-                    .is_some_and(|hash| hash.iter().all(u8::is_ascii_hexdigit))
+                    .is_some_and(|hash| hash == active_id.as_bytes())
                 && bytes
                     .get(index + 64)
                     .is_some_and(|separator| matches!(separator, b'/' | b'\\'))
@@ -262,6 +265,18 @@ pub fn verify_prompt(config: &Config, prompt: &Prompt) -> codex_protocol::error:
     };
     let mut sources =
         capture_prompt_sources(prompt).map_err(|error| CodexErr::Fatal(error.to_string()))?;
+    if prompt.base_instructions.text.is_empty()
+        && !snapshot
+            .single(SourceKind::MainPrompt)
+            .map_err(|error| CodexErr::Fatal(error.to_string()))?
+            .is_empty()
+    {
+        sources.push(PolicySource::new(
+            SourceKind::Builtin,
+            format!("request-base:{}", sha256(b"")),
+            String::new(),
+        ));
+    }
     if snapshot
         .single(SourceKind::MainPrompt)
         .is_ok_and(|main| main == prompt.base_instructions.text)
@@ -363,7 +378,7 @@ mod tests {
         let root = "C:/Program Files/CodexStripped/Policy/sources";
         let protected = format!("{root}/{digest}/tree/skill.md");
         assert_eq!(
-            canonical_source_paths(&protected, root),
+            canonical_source_paths(&protected, root, &digest),
             format!("{root}/ACCEPTED_SNAPSHOT/tree/skill.md")
         );
         for text in [
@@ -371,12 +386,13 @@ mod tests {
             format!("https://host/sources/{digest}/code"),
             format!("sources/{digest}/tree/skill.md"),
             format!("https://host/{protected}"),
+            format!("{root}/{}/tree/skill.md", "b".repeat(64)),
         ] {
-            assert_eq!(canonical_source_paths(&text, root), text);
+            assert_eq!(canonical_source_paths(&text, root, &digest), text);
         }
         let unicode =
             "\u{0418}\u{043d}\u{0441}\u{0442}\u{0440}\u{0443}\u{043a}\u{0446}\u{0438}\u{044f}";
-        assert_eq!(canonical_source_paths(unicode, root), unicode);
+        assert_eq!(canonical_source_paths(unicode, root, &digest), unicode);
     }
 
     #[test]
@@ -399,7 +415,9 @@ mod tests {
         let tool = serde_json::json!({"type":"function", "name":"lookup", "description":"Old description", "parameters":{"type":"object"}});
         let prompt = Prompt {
             input: vec![ResponseItem::ToolSearchOutput {
-                call_id: "search-1".to_string(),
+                id: None,
+                internal_chat_message_metadata_passthrough: None,
+                call_id: Some("search-1".to_string()),
                 status: "completed".to_string(),
                 execution: "client".to_string(),
                 tools: vec![tool],
@@ -438,6 +456,36 @@ mod tests {
                 .iter()
                 .any(|source| source.logical_id == "additional/functions/web_search")
         );
+    }
+
+    #[tokio::test]
+    async fn removing_nonempty_main_requires_approval_and_deliberately_empty_main_is_valid() {
+        let directory = tempfile::tempdir().unwrap();
+        let mut config = crate::config::ConfigBuilder::default()
+            .codex_home(directory.path().to_path_buf())
+            .harness_overrides(crate::config::ConfigOverrides {
+                cwd: Some(directory.path().to_path_buf()),
+                ephemeral: Some(true),
+                ..Default::default()
+            })
+            .loader_overrides(codex_config::LoaderOverrides::without_managed_config_for_tests())
+            .build()
+            .await
+            .unwrap();
+        config.instruction_snapshot = Some(std::sync::Arc::new(snapshot(Vec::new())));
+        assert!(verify_prompt(&config, &Prompt::default()).is_err());
+        let mut sources = snapshot(Vec::new()).sources;
+        sources
+            .iter_mut()
+            .find(|source| source.kind == SourceKind::MainPrompt)
+            .map(|source| {
+                *source = PolicySource::new(SourceKind::MainPrompt, "main", String::new())
+            })
+            .unwrap();
+        config.instruction_snapshot = Some(std::sync::Arc::new(
+            PolicySnapshot::new(ForkConfig::default(), sources).unwrap(),
+        ));
+        assert!(verify_prompt(&config, &Prompt::default()).is_ok());
     }
 
     #[tokio::test]

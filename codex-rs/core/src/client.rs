@@ -1204,39 +1204,6 @@ impl ModelClient {
             && provider.aws.is_none()
     }
 
-    fn set_guardian_metadata(
-        &self,
-        metadata: &mut Option<HashMap<String, String>>,
-        parent_response_id: Option<&str>,
-        auth: Option<&CodexAuth>,
-        responses_headers: &ApiHeaderMap,
-    ) {
-        if let Some(metadata) = metadata.as_mut() {
-            metadata.remove("guardian_credits_requested");
-            metadata.remove("parent_response_id");
-        }
-        let guardian_reviewer = is_guardian_reviewer(responses_headers);
-        if guardian_reviewer && let Some(parent_response_id) = parent_response_id {
-            metadata.get_or_insert_with(HashMap::new).insert(
-                "parent_response_id".to_owned(),
-                parent_response_id.to_owned(),
-            );
-        }
-        if !guardian_reviewer
-            && !crate::guardian::is_basic_session_source(&self.state.session_source)
-            && matches!(
-                auth,
-                Some(CodexAuth::Chatgpt(_) | CodexAuth::ChatgptAuthTokens(_))
-            )
-            && self.uses_codex_backend(auth)
-            && self.state.provider.info().supports_codex_backend_routes()
-        {
-            metadata
-                .get_or_insert_with(HashMap::new)
-                .insert("guardian_credits_requested".to_owned(), "true".to_owned());
-        }
-    }
-
     fn build_routing_hint_header(
         &self,
         auth: Option<&CodexAuth>,
@@ -1829,12 +1796,7 @@ impl ResponsesHttpExecutor<'_> {
                 responses_metadata,
                 include_internal,
             )?;
-            self.client.set_guardian_metadata(
-                &mut request.client_metadata,
-                responses_metadata.parent_response_id.as_deref(),
-                client_setup.auth.as_ref(),
-                &responses_headers,
-            );
+            strip_obsolete_guardian_metadata(&mut request.client_metadata);
             if is_guardian_reviewer(&responses_headers) {
                 request.service_tier = None;
             }
@@ -2156,12 +2118,7 @@ impl ModelClientSession {
                 ),
                 ..ResponseCreateWsRequest::from(&request)
             };
-            self.client.set_guardian_metadata(
-                &mut ws_payload.client_metadata,
-                responses_metadata.parent_response_id.as_deref(),
-                client_setup.auth.as_ref(),
-                &responses_headers,
-            );
+            strip_obsolete_guardian_metadata(&mut ws_payload.client_metadata);
             let interceptors = crate::model_request::prepare(
                 &self.client.request_contributors,
                 &self.client.state.thread_id.to_string(),
@@ -2443,6 +2400,13 @@ fn stamp_ws_stream_request_start_ms(request: &mut ResponsesWsRequest<'_>) {
             X_CODEX_WS_STREAM_REQUEST_START_MS_CLIENT_METADATA_KEY.to_string(),
             crate::turn_timing::now_unix_timestamp_ms().to_string(),
         );
+}
+
+fn strip_obsolete_guardian_metadata(metadata: &mut Option<HashMap<String, String>>) {
+    if let Some(metadata) = metadata {
+        metadata.remove("guardian_credits_requested");
+        metadata.remove("parent_response_id");
+    }
 }
 
 fn is_guardian_reviewer(responses_headers: &ApiHeaderMap) -> bool {

@@ -126,6 +126,67 @@ async fn plugin_refresh_resolves_only_the_final_layer_combination() {
 }
 
 #[tokio::test]
+async fn refresh_preserves_accepted_plugin_selection_and_updates_operational_servers() {
+    use codex_instruction_control::PolicySnapshot;
+    use codex_instruction_control::PolicySource;
+    use codex_instruction_control::SourceKind;
+    use std::sync::Arc;
+
+    let (_home, mut current) = base_config().await;
+    current.plugins.default = Some(codex_config::types::PluginsDefaultConfig { enabled: true });
+    current.plugins.plugins.insert(
+        "example@marketplace".into(),
+        codex_config::types::PluginConfig {
+            enabled: Some(true),
+            mcp_servers: Default::default(),
+        },
+    );
+    let sources = vec![
+        PolicySource::new(SourceKind::MainPrompt, "main", "accepted main".into()),
+        PolicySource::new(
+            SourceKind::ModelCatalog,
+            "models",
+            r#"{"models":[{"slug":"test","model_messages":{}}]}"#.into(),
+        ),
+        PolicySource::new(
+            SourceKind::Builtin,
+            "global-agents-home",
+            current.codex_home.to_string_lossy().to_string(),
+        ),
+        super::super::capture_instruction_settings(&current).unwrap(),
+    ];
+    current.instruction_snapshot = Some(Arc::new(
+        PolicySnapshot::new(Default::default(), sources).unwrap(),
+    ));
+    let incoming = layered_config(
+        &current,
+        "[plugins._default]\nenabled = false\n[plugins.\"example@marketplace\"]\nenabled = false\n[mcp_servers.ordinary]\nurl = 'https://updated.example/mcp'",
+        "",
+        "",
+        "",
+    ).await;
+    assert!(!incoming.plugins.allows_plugin("example@marketplace"));
+    for scope in [
+        RuntimeConfigRefresh::User,
+        RuntimeConfigRefresh::UserFiles,
+        RuntimeConfigRefresh::Mcp,
+    ] {
+        let refreshed = current.resolve_runtime_refresh(&incoming, scope).unwrap();
+        assert!(refreshed.plugins.default.as_ref().unwrap().enabled);
+        assert_eq!(
+            refreshed.plugins.plugins["example@marketplace"].enabled,
+            Some(true)
+        );
+        assert_eq!(refreshed.mcp_servers.get(), incoming.mcp_servers.get());
+        assert_eq!(refreshed.cwd, current.cwd);
+        assert_eq!(
+            refreshed.permissions.permission_profile(),
+            current.permissions.permission_profile()
+        );
+    }
+}
+
+#[tokio::test]
 async fn refresh_honors_disabled_enterprise_host_load_result() {
     let (_home, base) = base_config().await;
     let current = layered_config(

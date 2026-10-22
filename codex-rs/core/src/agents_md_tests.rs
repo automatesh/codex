@@ -352,6 +352,7 @@ async fn load_agents_md(config: &TestConfig) -> Option<LoadedAgentsMd> {
 async fn agents_md_paths(config: &TestConfig) -> std::io::Result<Vec<PathUri>> {
     super::agents_md_paths(
         &config.config,
+        codex_exec_server::LOCAL_ENVIRONMENT_ID,
         &PathUri::from_abs_path(&config.cwd),
         LOCAL_FS.as_ref(),
         /*sandbox*/ None,
@@ -825,7 +826,13 @@ async fn marker_search_does_not_wait_for_a_higher_ancestor() {
 
     let paths = tokio::time::timeout(
         std::time::Duration::from_secs(1),
-        super::agents_md_paths(&config.config, &cwd, &fs, /*sandbox*/ None),
+        super::agents_md_paths(
+            &config.config,
+            codex_exec_server::LOCAL_ENVIRONMENT_ID,
+            &cwd,
+            &fs,
+            /*sandbox*/ None,
+        ),
     )
     .await
     .expect("nearest marker should complete")
@@ -930,7 +937,13 @@ async fn project_root_marker_search_limits_concurrent_probes_and_preserves_order
         metadata_calls.release.add_permits(max_probe_count);
     };
     let (paths, ()) = tokio::join!(
-        super::agents_md_paths(&config.config, &cwd, &fs, /*sandbox*/ None),
+        super::agents_md_paths(
+            &config.config,
+            codex_exec_server::LOCAL_ENVIRONMENT_ID,
+            &cwd,
+            &fs,
+            /*sandbox*/ None
+        ),
         assertions
     );
     let paths = paths.expect("AGENTS.md discovery");
@@ -977,7 +990,14 @@ async fn agents_md_search_starts_all_directory_probes() {
         metadata_calls: Arc::clone(&metadata_calls),
     };
     let search = tokio::spawn(async move {
-        super::agents_md_paths(&config.config, &cwd, &fs, /*sandbox*/ None).await
+        super::agents_md_paths(
+            &config.config,
+            codex_exec_server::LOCAL_ENVIRONMENT_ID,
+            &cwd,
+            &fs,
+            /*sandbox*/ None,
+        )
+        .await
     });
     tokio::time::timeout(std::time::Duration::from_secs(5), async {
         loop {
@@ -1052,9 +1072,15 @@ async fn empty_project_root_markers_only_probe_cwd_candidates() {
     };
     let cwd = PathUri::from_abs_path(&config.cwd);
 
-    let paths = super::agents_md_paths(&config.config, &cwd, &fs, /*sandbox*/ None)
-        .await
-        .expect("AGENTS.md discovery");
+    let paths = super::agents_md_paths(
+        &config.config,
+        codex_exec_server::LOCAL_ENVIRONMENT_ID,
+        &cwd,
+        &fs,
+        /*sandbox*/ None,
+    )
+    .await
+    .expect("AGENTS.md discovery");
 
     let override_path = cwd.join(LOCAL_AGENTS_MD_FILENAME).expect("override path");
     let agents_path = cwd.join(DEFAULT_AGENTS_MD_FILENAME).expect("agents path");
@@ -1621,9 +1647,15 @@ async fn fallback_paths_are_rejected_before_filesystem_probes() {
             failure: InjectedFailure::MetadataNotFound,
             metadata_calls: Arc::clone(&metadata_calls),
         };
-        let paths = super::agents_md_paths(&cfg, &cwd, &filesystem, /*sandbox*/ None)
-            .await
-            .expect("discover paths");
+        let paths = super::agents_md_paths(
+            &cfg,
+            codex_exec_server::LOCAL_ENVIRONMENT_ID,
+            &cwd,
+            &filesystem,
+            /*sandbox*/ None,
+        )
+        .await
+        .expect("discover paths");
 
         assert_eq!(paths, Vec::<PathUri>::new());
         assert_eq!(
@@ -1829,19 +1861,89 @@ async fn protected_project_instructions_survive_changes_deletion_and_new_overrid
         if remove {
             fs::remove_file(&path).unwrap();
         }
-        let loaded = read_agents_md(&cfg, LOCAL_FS.as_ref(), "local", &cwd, 4096, None)
-            .await
-            .unwrap()
-            .unwrap();
+        let loaded = read_agents_md(
+            &cfg,
+            LOCAL_FS.as_ref(),
+            codex_exec_server::LOCAL_ENVIRONMENT_ID,
+            &cwd,
+            4096,
+            None,
+        )
+        .await
+        .unwrap()
+        .unwrap();
         assert_eq!(loaded.text(), "accepted project instructions");
     }
     let nested = root.path().join("nested");
     fs::create_dir(&nested).unwrap();
     fs::create_dir(nested.join(".git")).unwrap();
     let nested_cwd = PathUri::from_abs_path(&AbsolutePathBuf::from_absolute_path(nested).unwrap());
-    let loaded = read_agents_md(&cfg, LOCAL_FS.as_ref(), "local", &nested_cwd, 4096, None)
-        .await
-        .unwrap()
-        .unwrap();
+    let loaded = read_agents_md(
+        &cfg,
+        LOCAL_FS.as_ref(),
+        codex_exec_server::LOCAL_ENVIRONMENT_ID,
+        &nested_cwd,
+        4096,
+        None,
+    )
+    .await
+    .unwrap()
+    .unwrap();
     assert_eq!(loaded.text(), "accepted project instructions");
+}
+
+#[tokio::test]
+async fn protected_project_instructions_require_matching_environment_approval() {
+    use codex_instruction_control::{ForkConfig, PolicySnapshot, PolicySource, SourceKind};
+
+    let root = tempfile::tempdir().unwrap();
+    fs::write(root.path().join("AGENTS.md"), "accepted local instructions").unwrap();
+    let mut cfg = make_config(&root, 4096, None).await;
+    let cwd = PathUri::from_abs_path(&cfg.cwd);
+    let mut sources = capture_agents_sources(&cfg).await.unwrap();
+    sources.extend([
+        PolicySource::new(SourceKind::MainPrompt, "main", "main".into()),
+        PolicySource::new(
+            SourceKind::ModelCatalog,
+            "models",
+            r#"{"models":[{"slug":"test","model_messages":{}}]}"#.into(),
+        ),
+    ]);
+    cfg.instruction_snapshot = Some(Arc::new(
+        PolicySnapshot::new(ForkConfig::default(), sources.clone()).unwrap(),
+    ));
+    let remote_error = read_agents_md(&cfg, LOCAL_FS.as_ref(), "remote", &cwd, 4096, None)
+        .await
+        .unwrap_err();
+    assert_eq!(remote_error.kind(), io::ErrorKind::PermissionDenied);
+    assert!(remote_error.to_string().contains("environment `remote`"));
+
+    let remote_scope = format!("agents-scope:remote:{cwd}");
+    sources.push(PolicySource::new(
+        SourceKind::Builtin,
+        remote_scope,
+        cwd.to_string(),
+    ));
+    let document = cwd.join(DEFAULT_AGENTS_MD_FILENAME).unwrap();
+    sources.push(PolicySource::new(
+        SourceKind::Agents,
+        format!("project:remote:{document}"),
+        "explicitly accepted remote instructions".into(),
+    ));
+    cfg.instruction_snapshot = Some(Arc::new(
+        PolicySnapshot::new(ForkConfig::default(), sources).unwrap(),
+    ));
+    for (environment_id, expected) in [
+        (
+            codex_exec_server::LOCAL_ENVIRONMENT_ID,
+            "accepted local instructions",
+        ),
+        ("remote", "explicitly accepted remote instructions"),
+    ] {
+        let loaded = read_agents_md(&cfg, LOCAL_FS.as_ref(), environment_id, &cwd, 4096, None)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(loaded.text(), expected);
+    }
 }
