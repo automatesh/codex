@@ -54,6 +54,7 @@ jobs:
         if: ${{ !cancelled() }}
         run: cargo build --locked -p codex-cli --bin codex
       - name: Check CLI startup
+        if: ${{ !cancelled() }}
         run: |
           target/debug/codex --version
           target/debug/codex exec --help
@@ -73,6 +74,12 @@ jobs:
         with:
           persist-credentials: false
       - uses: dtolnay/rust-toolchain@e081816240890017053eacbb1bdf337761dc5582
+      - uses: ./.github/actions/setup-rusty-v8
+        with:
+          target: x86_64-pc-windows-msvc
+      - uses: ./.github/actions/setup-msvc-env
+        with:
+          target: x86_64-pc-windows-msvc
       - name: Build stripped Windows CLI
         run: cargo build --locked -p codex-cli -p codex-code-mode-host -p codex-responses-api-proxy -p codex-windows-sandbox -p codex-windows-sandbox-service --bin codex --bin codex-code-mode-host --bin codex-responses-api-proxy --bin codex-windows-sandbox-setup --bin codex-windows-sandbox-service --bin codex-command-runner
       - name: Verify Windows executable

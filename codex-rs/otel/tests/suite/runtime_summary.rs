@@ -1,7 +1,6 @@
 use codex_otel::MetricsClient;
 use codex_otel::MetricsConfig;
 use codex_otel::Result;
-use codex_otel::RuntimeMetricsSummary;
 use codex_otel::SessionTelemetry;
 use codex_otel::TelemetryAuthMode;
 use codex_otel::metrics_data::InMemoryMetricExporter;
@@ -9,7 +8,6 @@ use codex_protocol::ThreadId;
 use codex_protocol::ToolName;
 use codex_protocol::protocol::SessionSource;
 use eventsource_stream::Event as StreamEvent;
-use pretty_assertions::assert_eq;
 use std::time::Duration;
 use tokio_tungstenite::tungstenite::Message;
 
@@ -102,10 +100,13 @@ fn api_and_streaming_activity_do_not_collect_metrics() -> Result<()> {
         events.is_empty(),
         "unexpected API activity events: {events:?}"
     );
-    let summary = manager
-        .runtime_metrics_summary()
-        .expect("runtime metrics summary should be available");
-    assert_eq!(summary, RuntimeMetricsSummary::default());
+    assert!(
+        manager
+            .snapshot_metrics()?
+            .scope_metrics()
+            .all(|scope| scope.metrics().next().is_none())
+    );
+    assert!(manager.runtime_metrics_summary().is_none());
 
     Ok(())
 }

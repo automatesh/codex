@@ -348,11 +348,16 @@ impl MetricsClientInner {
             state.shutdown = true;
         }
         let snapshot = self.collect(true);
-        self.exporter
-            .finished
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
-            .push(snapshot);
+        if snapshot
+            .scope_metrics()
+            .any(|scope| scope.metrics().next().is_some())
+        {
+            self.exporter
+                .finished
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .push(snapshot);
+        }
         Ok(())
     }
 }
