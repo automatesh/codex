@@ -77,3 +77,30 @@ pub(crate) fn histogram_data(
         _ => panic!("unexpected metric data type"),
     }
 }
+
+pub(crate) fn capture_events(operation: impl FnOnce()) -> Vec<String> {
+    use std::sync::{Arc, Mutex};
+    use tracing_subscriber::layer::SubscriberExt;
+    struct Events(Arc<Mutex<Vec<String>>>);
+    impl<S: tracing::Subscriber> tracing_subscriber::Layer<S> for Events {
+        fn on_event(
+            &self,
+            event: &tracing::Event<'_>,
+            _: tracing_subscriber::layer::Context<'_, S>,
+        ) {
+            self.0
+                .lock()
+                .unwrap()
+                .push(event.metadata().target().to_string());
+        }
+    }
+    let events = Arc::new(Mutex::new(Vec::new()));
+    let subscriber = tracing_subscriber::registry().with(Events(Arc::clone(&events)));
+    tracing::subscriber::with_default(subscriber, || {
+        tracing::info!(target: "test_collector", "collector is active");
+        operation();
+    });
+    let mut events = events.lock().unwrap().clone();
+    assert_eq!(events.remove(0), "test_collector");
+    events
+}

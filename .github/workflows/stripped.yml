@@ -74,7 +74,7 @@ jobs:
           persist-credentials: false
       - uses: dtolnay/rust-toolchain@e081816240890017053eacbb1bdf337761dc5582
       - name: Build stripped Windows CLI
-        run: cargo build --locked -p codex-cli --bin codex
+        run: cargo build --locked -p codex-cli -p codex-code-mode-host -p codex-responses-api-proxy -p codex-windows-sandbox -p codex-windows-sandbox-service --bin codex --bin codex-code-mode-host --bin codex-responses-api-proxy --bin codex-windows-sandbox-setup --bin codex-windows-sandbox-service --bin codex-command-runner
       - name: Verify Windows executable
         run: |
           ./target/debug/codex.exe --version
@@ -82,5 +82,11 @@ jobs:
       - uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f
         with:
           name: codex-stripped-windows-x86_64
-          path: codex-rs/target/debug/codex.exe
+          path: |
+            codex-rs/target/debug/codex.exe
+            codex-rs/target/debug/codex-code-mode-host.exe
+            codex-rs/target/debug/codex-responses-api-proxy.exe
+            codex-rs/target/debug/codex-windows-sandbox-setup.exe
+            codex-rs/target/debug/codex-windows-sandbox-service.exe
+            codex-rs/target/debug/codex-command-runner.exe
           if-no-files-found: error

@@ -69,3 +69,7 @@ impl StorageTelemetry {
     pub fn record_save_attempt<E>(&mut self, _store: Store, _result: &Result<(), E>) {}
     pub fn record_delete_attempt<E>(&mut self, _store: Store, _result: &Result<bool, E>) {}
 }
+
+#[cfg(test)]
+#[path = "auth_storage_tests.rs"]
+mod tests;

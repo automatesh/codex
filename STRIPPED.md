@@ -14,7 +14,8 @@ tools, MCP, skills, subagents, hooks, session persistence, resume, and compactio
 - Guardian V2 action classifier and synchronous reviewer, their extension hooks,
   review sessions, retry loops, rejection circuit breaker and decision cache.
 - OTEL exporter initialization, runtime OTEL event emission, and automatic HTTP/MCP trace propagation.
-- Startup metric buffering before a provider is installed.
+- Startup metric buffering and automatic auth/tool/API/activity observations.
+- Telemetry identity metadata and feedback/SQLite diagnostic collection on startup.
 - Feedback request/auth metadata collection and its tracing layer.
 - Sentry feedback uploads, envelope construction, attachments for upload, and the
   Sentry dependency. Feedback submission returns a disabled error.
@@ -30,7 +31,7 @@ creation returns `None`. Local counters, histograms and metric snapshots use pla
 Rust types; they do not depend on OpenTelemetry and have no network exporter or
 background worker.
 
-Local diagnostic logs and session files are retained. Model requests, authentication,
+Ordinary operational logs, session files and server-provided token usage are retained. Model requests, authentication,
 web research, MCP, and connected tools still require their normal network access.
 Manual approval and sandbox enforcement remain. Guardian is unavailable; explicit
 AutoReview settings and managed requirements that mandate it are rejected rather
@@ -49,6 +50,8 @@ cargo build --locked -p codex-cli --bin codex
 
 The executable is written to `codex-rs/target/debug/codex` (`codex.exe` on Windows).
 Building does not install it or change an existing Codex installation.
+The Windows CI artifact also bundles the code-mode host, Responses proxy and three
+sandbox helper executables; keep these beside `codex.exe`.
 
 ## Checks
 
