@@ -397,6 +397,17 @@ mod tests {
                 .await
                 .expect_err("history load should fail"),
         );
+        let archive = ThreadStore::load_instruction_history(
+            &store,
+            LoadThreadHistoryParams {
+                thread_id,
+                include_archived: false,
+            },
+        )
+        .await
+        .expect("complete paginated instruction history");
+        assert_eq!(archive.thread_id, thread_id);
+        assert!(!archive.items.is_empty());
         store
             .resume_thread(ResumeThreadParams {
                 history_revision: None,
@@ -972,6 +983,21 @@ impl ThreadStore for InMemoryThreadStore {
         params: LoadThreadHistoryParams,
     ) -> ThreadStoreFuture<'_, StoredThreadHistory> {
         Box::pin(InMemoryThreadStore::load_history(self, params))
+    }
+
+    fn load_instruction_history(
+        &self,
+        params: LoadThreadHistoryParams,
+    ) -> ThreadStoreFuture<'_, StoredThreadHistory> {
+        Box::pin(async move {
+            // The in-memory store keeps the whole history rather than a compacted suffix.
+            let history = InMemoryThreadStore::load_latest_model_context(self, params).await?;
+            Ok(StoredThreadHistory {
+                thread_id: history.thread_id,
+                items: history.items,
+                revision: history.revision,
+            })
+        })
     }
 
     fn load_latest_model_context(
