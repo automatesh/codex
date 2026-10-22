@@ -272,22 +272,12 @@ fn emit_policy_audit_event(state: &NetworkProxyState, args: PolicyAuditEventArgs
         .as_deref()
         .or(audit_metadata.conversation_id.as_deref());
     let timestamp = audit_timestamp();
-    let launch_trace_id = state
-        .launch_span_context
-        .as_ref()
-        .map(|context| context.trace_id().to_string());
-    let launch_span_id = state
-        .launch_span_context
-        .as_ref()
-        .map(|context| context.span_id().to_string());
     let executor_identity = process_log_metadata.executor_identity.as_ref();
     tracing::event!(
         target: AUDIT_TARGET,
         tracing::Level::INFO,
         event.name = POLICY_DECISION_EVENT_NAME,
         event.timestamp = %timestamp,
-        launch.trace_id = launch_trace_id.as_deref(),
-        launch.span_id = launch_span_id.as_deref(),
         conversation.id = conversation_id,
         tool.call_id = process_log_metadata.tool_call_id.as_deref(),
         executor.environment_id = executor_identity.map(|identity| identity.environment_id.as_str()),

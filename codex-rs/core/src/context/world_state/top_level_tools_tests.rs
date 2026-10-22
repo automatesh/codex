@@ -7,12 +7,12 @@ use crate::session::extension_metrics::from_session_telemetry;
 use codex_otel::MetricsClient;
 use codex_otel::MetricsConfig;
 use codex_otel::SessionTelemetry;
+use codex_otel::metrics_data::AggregatedMetrics;
+use codex_otel::metrics_data::InMemoryMetricExporter;
+use codex_otel::metrics_data::MetricData;
+use codex_otel::metrics_data::ScopeMetrics;
 use codex_protocol::ThreadId;
 use codex_protocol::protocol::SessionSource;
-use opentelemetry_sdk::metrics::InMemoryMetricExporter;
-use opentelemetry_sdk::metrics::data::AggregatedMetrics;
-use opentelemetry_sdk::metrics::data::MetricData;
-use opentelemetry_sdk::metrics::data::ScopeMetrics;
 use pretty_assertions::assert_eq;
 use serde_json::json;
 

@@ -1,6 +1,6 @@
 //! Supports local operation metrics only after an in-memory client is explicitly installed.
 //! The process-global buffer starts disabled in this fork.
-//! Each pair is admitted together; lifecycle transitions serialize with local SDK recording.
+//! Each pair is admitted together; lifecycle transitions serialize with local metric recording.
 //! Shutting down the active installation resumes buffering until its replacement is ready.
 
 use super::MetricsClient;

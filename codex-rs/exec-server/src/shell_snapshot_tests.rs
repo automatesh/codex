@@ -3,10 +3,10 @@ use std::collections::HashMap;
 
 use codex_otel::MetricsClient;
 use codex_otel::MetricsConfig;
+use codex_otel::metrics_data::AggregatedMetrics;
+use codex_otel::metrics_data::InMemoryMetricExporter;
+use codex_otel::metrics_data::MetricData;
 use codex_protocol::config_types::ShellEnvironmentPolicyInherit;
-use opentelemetry_sdk::metrics::InMemoryMetricExporter;
-use opentelemetry_sdk::metrics::data::AggregatedMetrics;
-use opentelemetry_sdk::metrics::data::MetricData;
 use pretty_assertions::assert_eq;
 use test_case::test_case;
 
@@ -189,7 +189,7 @@ async fn snapshot_failure_retries_are_bounded_and_single_flight(
     let mut waits = BTreeMap::new();
     for metric in snapshot
         .scope_metrics()
-        .flat_map(opentelemetry_sdk::metrics::data::ScopeMetrics::metrics)
+        .flat_map(codex_otel::metrics_data::ScopeMetrics::metrics)
     {
         match metric.name() {
             "codex.shell_snapshot" => {

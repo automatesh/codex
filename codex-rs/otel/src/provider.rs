@@ -7,11 +7,7 @@ use tracing_subscriber::Layer;
 use tracing_subscriber::registry::LookupSpan;
 
 /// Kept for callers shared with upstream; this fork has no OTEL export provider.
-pub struct OtelProvider {
-    pub logger: Option<opentelemetry_sdk::logs::SdkLoggerProvider>,
-    pub tracer_provider: Option<opentelemetry_sdk::trace::SdkTracerProvider>,
-    pub tracer: Option<opentelemetry_sdk::trace::Tracer>,
-}
+pub struct OtelProvider;
 
 impl OtelProvider {
     pub fn shutdown(&self) {}

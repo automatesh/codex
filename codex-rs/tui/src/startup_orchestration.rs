@@ -624,48 +624,8 @@ pub(super) async fn run_main_inner(
 
     remove_legacy_tui_log_file(config.codex_home.as_path());
 
-    let otel_originator = originator().value;
-    let otel = match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-        codex_app_server_client::build_otel_provider(
-            &config,
-            env!("CARGO_PKG_VERSION"),
-            /*service_name_override*/ None,
-            /*default_analytics_enabled*/ true,
-        )
-    })) {
-        Ok(Ok(otel)) => otel,
-        Ok(Err(e)) => {
-            startup_draft.flush_pending_events().await?;
-            startup_draft
-                .tui_mut()
-                .with_restored(crate::tui::TerminalHandoff::Restore, || async {
-                    #[allow(clippy::print_stderr)]
-                    {
-                        eprintln!("Could not create otel exporter: {e}");
-                    }
-                })
-                .await;
-            None
-        }
-        Err(_) => {
-            #[allow(clippy::print_stderr)]
-            {
-                eprintln!("Could not create otel exporter: panicked during initialization");
-            }
-            startup_draft.tui_mut().recover_after_caught_panic()?;
-            None
-        }
-    };
-    let metrics = otel
-        .as_ref()
-        .and_then(codex_otel::OtelProvider::metrics)
-        .cloned();
-    if let Some(metrics) = &metrics {
-        let _ = codex_otel::record_process_start_once(metrics, otel_originator.as_str());
-        let telemetry =
-            codex_rollout::sqlite_telemetry_recorder(metrics.clone(), otel_originator.as_str());
-        let _ = codex_state::install_process_db_telemetry(telemetry);
-    }
+    let otel: Option<codex_otel::OtelProvider> = None;
+    let metrics: Option<codex_otel::MetricsClient> = None;
     let selection_reason = match (&app_server_target, daemon_exclusion) {
         (AppServerTarget::Remote { .. }, _) => "explicit_remote",
         _ if cli.agents_overview => "agents",
@@ -834,8 +794,6 @@ pub(super) async fn run_main_inner(
     };
 
     let feedback = codex_feedback::CodexFeedback::new();
-    let feedback_layer = feedback.logger_layer();
-    let feedback_metadata_layer = feedback.metadata_layer();
 
     if cli.oss && model_provider_override.is_some() {
         // We're in the oss section, so provider_id should be Some
@@ -861,24 +819,9 @@ pub(super) async fn run_main_inner(
             .await?;
     }
 
-    let otel_logger_layer = otel.as_ref().and_then(|o| o.logger_layer());
-
-    let otel_tracing_layer = otel.as_ref().and_then(|o| o.tracing_layer());
-
-    let log_db = state_db
-        .clone()
-        .map(|state_db| log_db::start(state_db, std::sync::Arc::new(feedback.clone())));
-    let log_db_layer = log_db
-        .clone()
-        .map(|layer| layer.with_filter(log_db::default_filter()));
-
+    let log_db = None;
     let _ = tracing_subscriber::registry()
         .with(tui_file_layer)
-        .with(feedback_layer)
-        .with(feedback_metadata_layer)
-        .with(log_db_layer)
-        .with(otel_logger_layer)
-        .with(otel_tracing_layer)
         .try_init();
 
     if let Err(err) = screen_reader_result {

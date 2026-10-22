@@ -1,30 +1,23 @@
-//! Hosts approval decisions and the isolated synchronous reviewer.
-//! The extension chooses policy and evidence; core enforces permissions and mandatory
-//! review requirements. Each approval retains its issuing context and cancellation.
+//! Approval request compatibility and manual approval routing.
 
 mod approval_request;
 mod coverage;
 mod decision;
-mod feedback;
 mod input_budget;
 mod permissions;
 mod prompt;
+mod request_budget;
+mod review;
+mod runtime;
 pub(crate) use input_budget::PendingReviewContext;
 pub(crate) use input_budget::check_pending as check_pending_guardian_input;
 pub(crate) use input_budget::finalize as finalize_guardian_input;
 pub(crate) use input_budget::should_compact as should_compact_guardian_input;
 pub(crate) use permissions::for_tool as tool_permission_context;
-mod request_budget;
 pub(crate) use request_budget::ExhaustedReviewBudget;
 pub(crate) use request_budget::observe as observe_guardian_request;
 pub(crate) use request_budget::prepare_prompt as prepare_guardian_prompt;
-mod review;
-mod review_session;
-mod reviewer_config;
-pub(crate) use reviewer_config::resolve_review_model;
-mod runtime;
-#[cfg(test)]
-pub(crate) mod test_host;
+pub(crate) use runtime::ReviewAction;
 
 use codex_protocol::items::ModelInvocationContext;
 use std::sync::Arc;
@@ -35,7 +28,6 @@ use codex_protocol::config_types::ReasoningSummary;
 use codex_protocol::openai_models::ModelInfo;
 use codex_protocol::openai_models::ReasoningEffort;
 use codex_protocol::protocol::AskForApproval;
-use codex_protocol::protocol::GuardianAssessmentOutcome;
 
 use crate::agents_md::LoadedAgentsMd;
 use crate::environment_selection::TurnEnvironmentSnapshot;
@@ -56,23 +48,9 @@ pub(crate) use review::GuardianReviewOptions;
 pub(crate) use review::is_basic_session_source;
 pub(crate) use review::new_guardian_review_id;
 pub(crate) use review::routes_approval_policy_to_guardian;
-pub use review_session::GuardianReviewSession;
-pub(crate) use review_session::GuardianReviewSessionManager;
-pub use review_session::GuardianReviewState;
-pub use review_session::PreparedGuardianContext;
-pub use review_session::prepare_review_prewarm;
-
-pub(crate) use review_session::prompt_cache_key_override_for_review_session;
-pub(crate) use runtime::ReviewAction;
-
-pub(crate) use codex_guardian_reviewer::REVIEW_TIMEOUT as GUARDIAN_REVIEW_TIMEOUT;
 pub(crate) const GUARDIAN_REVIEWER_NAME: &str = "guardian";
 pub(crate) const AUTO_REVIEW_DENIED_ACTION_APPROVAL_DEVELOPER_PREFIX: &str =
     codex_guardian_context::MANUAL_APPROVAL_DEVELOPER_PREFIX;
-const GUARDIAN_MAX_TOOL_ENTRY_TOKENS: usize = codex_guardian_context::ContextProfile::synchronous()
-    .transcript
-    .entry_limits
-    .tool_tokens;
 pub(crate) const GUARDIAN_MAX_ROOT_MESSAGE_TOKENS: usize = 900;
 pub(crate) const GUARDIAN_MAX_NODE_REPL_TOOL_RESULT_TOKENS: usize = 6_000;
 
@@ -198,30 +176,19 @@ impl From<&Arc<TurnContext>> for GuardianReviewContext {
     }
 }
 
-#[cfg(test)]
-use codex_guardian_reviewer::guardian_output_schema;
-
 pub(crate) use approval_request::format_guardian_action_pretty;
-#[cfg(test)]
-use approval_request::guardian_assessment_action;
-#[cfg(test)]
-use approval_request::guardian_request_turn_id;
-#[cfg(test)]
-use codex_guardian_reviewer::GuardianReviewOutcome;
-#[cfg(test)]
-use prompt::GuardianPromptMode;
-#[cfg(test)]
-use prompt::GuardianTranscriptCursor;
-#[cfg(test)]
-use prompt::build_guardian_prompt_items;
-#[cfg(test)]
-use prompt::build_guardian_prompt_items_with_parent_turn;
-#[cfg(test)]
-use prompt::render_guardian_transcript_entries;
-#[cfg(test)]
-use review::run_guardian_review_session_with_retry as run_guardian_review_session_for_test;
-#[cfg(test)]
-use review_session::build_guardian_review_session_config as build_guardian_review_session_config_for_test;
+pub(crate) const GUARDIAN_REVIEW_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(90);
 
-#[cfg(test)]
-mod tests;
+pub(crate) fn reviewer_tool_policy() -> codex_extension_api::ToolPolicy {
+    codex_extension_api::ToolPolicy {
+        allowed_tools: Some(
+            ["exec_command", "write_stdin", "view_image", "exec", "wait"]
+                .into_iter()
+                .map(codex_extension_api::ToolName::plain)
+                .collect(),
+        ),
+        require_managed_sandbox: true,
+        require_unified_exec: true,
+        expose_additional_permissions: false,
+    }
+}

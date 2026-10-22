@@ -2755,10 +2755,10 @@ async fn shell_startup_credentials_are_brokered(
 ) -> Result<()> {
     use codex_otel::MetricsClient;
     use codex_otel::MetricsConfig;
-    use opentelemetry_sdk::metrics::data::AggregatedMetrics;
-    use opentelemetry_sdk::metrics::data::HistogramDataPoint;
-    use opentelemetry_sdk::metrics::data::MetricData;
-    use opentelemetry_sdk::metrics::data::SumDataPoint;
+    use codex_otel::metrics_data::AggregatedMetrics;
+    use codex_otel::metrics_data::HistogramDataPoint;
+    use codex_otel::metrics_data::MetricData;
+    use codex_otel::metrics_data::SumDataPoint;
     use std::collections::BTreeMap;
 
     skip_if_no_network!(Ok(()));
@@ -3024,7 +3024,7 @@ ZDOTDIR = "{}"
         let mut counts = BTreeMap::new();
         for metric in snapshot
             .scope_metrics()
-            .flat_map(opentelemetry_sdk::metrics::data::ScopeMetrics::metrics)
+            .flat_map(codex_otel::metrics_data::ScopeMetrics::metrics)
         {
             let count = match (metric.name(), metric.data()) {
                 ("codex.shell_snapshot.command", AggregatedMetrics::U64(MetricData::Sum(sum))) => {

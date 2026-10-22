@@ -13,9 +13,6 @@ use crate::config::ConstraintResult;
 use crate::environment_selection::validate_environment_ids_and_cwds;
 use crate::exec_policy::AllowPrefixRules;
 use codex_features::Feature;
-use codex_prompts::ResolvedModelMessages;
-use codex_protocol::openai_models::GuardianV2ModelConfig;
-use codex_protocol::openai_models::GuardianV2TranscriptModelConfig;
 use codex_protocol::openai_models::MODEL_SPECIALTY_CYBER;
 use codex_protocol::openai_models::ModelInfo;
 use codex_protocol::protocol::EnvironmentConfigState;
@@ -89,8 +86,8 @@ fn check_legacy_model_safety(
     admitted: &ModelInfo,
     current: &ModelInfo,
     destination: &ModelInfo,
-    admitted_config: &Config,
-    live_config: &Config,
+    _admitted_config: &Config,
+    _live_config: &Config,
 ) -> Result<(), String> {
     if admitted.used_fallback_model_metadata || current.used_fallback_model_metadata {
         return Err("the active model has only fallback metadata".to_string());
@@ -99,15 +96,6 @@ fn check_legacy_model_safety(
         return Err("the destination model has only fallback metadata".to_string());
     }
     let retained_models = [admitted, current];
-    // The Guardian reviewer extension still selects its circuit-breaker
-    // policy from the admitted model's Cyber classification.
-    let destination_is_cyber =
-        destination.model_specialty.as_deref() == Some(MODEL_SPECIALTY_CYBER);
-    if retained_models.iter().any(|model| {
-        (model.model_specialty.as_deref() == Some(MODEL_SPECIALTY_CYBER)) != destination_is_cyber
-    }) {
-        return Err("the destination changes the admitted Guardian rejection policy".to_string());
-    }
     // TurnMetadataState pins both node REPL flags. Guardian prompt/evidence
     // construction also reads node_repl_auto_review_required from the turn.
     if retained_models.iter().any(|model| {
@@ -119,98 +107,11 @@ fn check_legacy_model_safety(
     }
     if retained_models
         .iter()
-        .any(|model| model.guardian != destination.guardian)
-    {
-        return Err("the destination changes the admitted Guardian coverage".to_string());
-    }
-    if retained_models
-        .iter()
         .any(|model| model.node_repl_disabled != destination.node_repl_disabled)
     {
         return Err(
             "the destination changes the admitted node REPL availability restriction".to_string(),
         );
-    }
-    // guardian::review::guardian_review_session_config and Guardian V2 still
-    // select the reviewer from the retained parent metadata.
-    if retained_models
-        .iter()
-        .any(|model| model.auto_review_model_override != destination.auto_review_model_override)
-    {
-        return Err("the destination changes the explicit Guardian reviewer model".to_string());
-    }
-
-    if (admitted_config.features.enabled(Feature::GuardianV2) || destination.guardian.is_some())
-        && admitted_config.features.enabled(Feature::GuardianApproval)
-    {
-        // GuardianV2Extension::on_tool_start reads the parent ModelInfo from
-        // thread_store. Its classifier settings are independent of the reviewer
-        // override. Local overrides may mask differences, but resolving those
-        // overrides remains the extension's responsibility.
-        let classification_settings =
-            |model: &ModelInfo| -> GuardianV2ModelConfig {
-                let mut settings = model
-                    .model_messages
-                    .as_ref()
-                    .and_then(|messages| messages.guardian_v2.clone())
-                    .unwrap_or_default();
-                // Missing and empty transcript records supply the same defaults.
-                if settings.transcript.as_ref().is_some_and(|transcript| {
-                    *transcript == GuardianV2TranscriptModelConfig::default()
-                }) {
-                    settings.transcript = None;
-                }
-                settings
-            };
-        let destination_settings = classification_settings(destination);
-        if retained_models
-            .iter()
-            .any(|model| classification_settings(model) != destination_settings)
-        {
-            return Err(
-                "the destination changes the admitted Guardian V2 classification settings"
-                    .to_string(),
-            );
-        }
-    }
-
-    // guardian_review_session_config and Guardian V2 can fall back to parent
-    // metadata if their preferred reviewer is unavailable, including after a
-    // catalog refresh. V1 uses the admitted config; V2 can use the live config.
-    // An unchanged explicit reviewer override prevents both fallback paths.
-    if destination.auto_review_model_override.is_none() {
-        let destination_model_messages = ResolvedModelMessages::from_model(destination);
-        let destination_auto_review = destination_model_messages.auto_review();
-        let retained_model_messages = retained_models.map(ResolvedModelMessages::from_model);
-        let retained_auto_review = retained_model_messages
-            .each_ref()
-            .map(ResolvedModelMessages::auto_review);
-        if retained_auto_review.iter().any(|auto_review| {
-            auto_review.node_repl_policy != destination_auto_review.node_repl_policy
-        }) {
-            return Err(
-                "the destination changes the Guardian parent-fallback node REPL policy".to_string(),
-            );
-        }
-        for config in [admitted_config, live_config] {
-            let destination_policy = config.resolve_guardian_policy(destination_model_messages);
-            if retained_model_messages.iter().any(|model_messages| {
-                config.resolve_guardian_policy(*model_messages) != destination_policy
-            }) {
-                return Err(
-                    "the destination changes the Guardian parent-fallback policy".to_string(),
-                );
-            }
-        }
-        let destination_template = destination_auto_review.policy_template.trim_end();
-        if retained_auto_review
-            .iter()
-            .any(|auto_review| auto_review.policy_template.trim_end() != destination_template)
-        {
-            return Err(
-                "the destination changes the Guardian parent-fallback policy template".to_string(),
-            );
-        }
     }
     Ok(())
 }

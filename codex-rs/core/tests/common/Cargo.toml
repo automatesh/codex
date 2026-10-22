@@ -22,7 +22,6 @@ codex-config = { workspace = true }
 codex-core = { workspace = true }
 codex-extension-api = { workspace = true }
 codex-exec-server = { workspace = true }
-codex-guardian-v2 = { workspace = true }
 codex-home = { workspace = true }
 codex-features = { workspace = true }
 codex-hooks = { workspace = true }
@@ -37,15 +36,12 @@ codex-utils-path-uri = { workspace = true }
 ctor = { workspace = true }
 futures = { workspace = true }
 notify = { workspace = true }
-opentelemetry = { workspace = true }
-opentelemetry_sdk = { workspace = true }
 regex-lite = { workspace = true }
 serde_json = { workspace = true }
 tempfile = { workspace = true }
 tokio = { workspace = true, features = ["net", "test-util", "time"] }
 tokio-tungstenite = { workspace = true }
 tracing = { workspace = true }
-tracing-opentelemetry = { workspace = true }
 tracing-subscriber = { workspace = true }
 walkdir = { workspace = true }
 wiremock = { workspace = true }

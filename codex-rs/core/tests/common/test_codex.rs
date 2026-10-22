@@ -853,11 +853,6 @@ impl TestCodexBuilder {
         let thread_manager = Arc::new_cyclic(|manager| {
             let mut extensions = self.extensions.to_builder();
             codex_core::install_agent_message_board(&mut extensions, manager.clone());
-            if config.features.enabled(Feature::GuardianV2) {
-                codex_guardian_v2::install(&mut extensions, auth_manager.clone(), manager.clone());
-            } else {
-                codex_guardian_v2::install_reviewer(&mut extensions, manager.clone());
-            }
             let thread_manager = ThreadManager::new(
                 &config,
                 auth_manager.clone(),

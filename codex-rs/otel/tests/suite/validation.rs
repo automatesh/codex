@@ -2,7 +2,7 @@ use codex_otel::MetricsClient;
 use codex_otel::MetricsConfig;
 use codex_otel::MetricsError;
 use codex_otel::Result;
-use opentelemetry_sdk::metrics::InMemoryMetricExporter;
+use codex_otel::metrics_data::InMemoryMetricExporter;
 
 fn build_in_memory_client() -> Result<MetricsClient> {
     let exporter = InMemoryMetricExporter::default();

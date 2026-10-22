@@ -128,12 +128,12 @@ fn timer_result_records_success() -> Result<()> {
     let attrs = attributes_to_map(
         crate::harness::find_metric(&resource_metrics, "codex.request_latency")
             .and_then(|metric| match metric.data() {
-                opentelemetry_sdk::metrics::data::AggregatedMetrics::F64(
-                    opentelemetry_sdk::metrics::data::MetricData::Histogram(histogram),
+                codex_otel::metrics_data::AggregatedMetrics::F64(
+                    codex_otel::metrics_data::MetricData::Histogram(histogram),
                 ) => histogram
                     .data_points()
                     .next()
-                    .map(opentelemetry_sdk::metrics::data::HistogramDataPoint::attributes),
+                    .map(codex_otel::metrics_data::HistogramDataPoint::attributes),
                 _ => None,
             })
             .expect("codex.request_latency attributes should exist"),

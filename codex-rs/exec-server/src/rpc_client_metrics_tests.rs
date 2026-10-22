@@ -5,9 +5,9 @@ use std::time::Duration;
 
 use codex_otel::MetricsClient;
 use codex_otel::MetricsConfig;
-use opentelemetry_sdk::metrics::InMemoryMetricExporter;
-use opentelemetry_sdk::metrics::data::AggregatedMetrics;
-use opentelemetry_sdk::metrics::data::MetricData;
+use codex_otel::metrics_data::AggregatedMetrics;
+use codex_otel::metrics_data::InMemoryMetricExporter;
+use codex_otel::metrics_data::MetricData;
 use pretty_assertions::assert_eq;
 use serde_json::Value;
 use tokio::sync::mpsc;
@@ -72,7 +72,7 @@ impl Harness {
         let mut counts = BTreeMap::new();
         for metric in snapshot
             .scope_metrics()
-            .flat_map(opentelemetry_sdk::metrics::data::ScopeMetrics::metrics)
+            .flat_map(codex_otel::metrics_data::ScopeMetrics::metrics)
             .filter(|metric| metric.name() == "exec_server_client_requests_total")
         {
             let AggregatedMetrics::U64(MetricData::Sum(sum)) = metric.data() else {
@@ -81,12 +81,7 @@ impl Harness {
             for point in sum.data_points() {
                 let attributes = point
                     .attributes()
-                    .map(|attribute| {
-                        (
-                            attribute.key.as_str(),
-                            attribute.value.as_str().into_owned(),
-                        )
-                    })
+                    .map(|attribute| (attribute.key.as_str(), attribute.value.as_str().to_string()))
                     .collect::<Vec<_>>();
                 assert_eq!(attributes.len(), 1, "only the method is labeled");
                 assert_eq!(attributes[0].0, "method");

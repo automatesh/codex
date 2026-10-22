@@ -3,9 +3,9 @@
 use super::*;
 use crate::MetricsClient;
 use crate::MetricsConfig;
-use opentelemetry_sdk::metrics::InMemoryMetricExporter;
-use opentelemetry_sdk::metrics::data::AggregatedMetrics;
-use opentelemetry_sdk::metrics::data::MetricData;
+use crate::metrics_data::AggregatedMetrics;
+use crate::metrics_data::InMemoryMetricExporter;
+use crate::metrics_data::MetricData;
 use pretty_assertions::assert_eq;
 use std::collections::BTreeMap;
 
@@ -31,7 +31,7 @@ fn run_in_subprocess() -> bool {
 }
 
 #[test]
-fn startup_fallback_exports_one_logical_operation_without_error_contents() -> crate::Result<()> {
+fn startup_fallback_is_not_replayed_but_explicit_local_metrics_work() -> crate::Result<()> {
     if run_in_subprocess() {
         return Ok(());
     }
@@ -72,12 +72,35 @@ fn startup_fallback_exports_one_logical_operation_without_error_contents() -> cr
         MetricsConfig::in_memory("test", "test", "1", InMemoryMetricExporter::default())
             .with_runtime_reader(),
     )?);
+    assert!(
+        metrics
+            .snapshot()?
+            .scope_metrics()
+            .all(|scope| scope.metrics().next().is_none()),
+        "installing local metrics must not replay activity from before opt-in"
+    );
+    let mut telemetry = AuthStorageOriginator::from_client_name("Codex Desktop").sync_scope(|| {
+        StorageTelemetry::new(
+            CredentialKind::Codex,
+            StoreMode::Auto,
+            Store::Secrets,
+            Operation::Save,
+            AuthStorageOriginator::current(),
+        )
+    });
+    telemetry.record_save_attempt(Store::Secrets, &failure);
+    telemetry.record_save_attempt(Store::File, &success);
+    telemetry.record_secure_error(&std::io::Error::new(
+        std::io::ErrorKind::PermissionDenied,
+        "private account",
+    ));
+    drop(telemetry);
     let snapshot = metrics.snapshot()?;
     let mut counts = Vec::new();
     let mut durations = Vec::new();
     for metric in snapshot
         .scope_metrics()
-        .flat_map(opentelemetry_sdk::metrics::data::ScopeMetrics::metrics)
+        .flat_map(crate::metrics_data::ScopeMetrics::metrics)
     {
         match metric.data() {
             AggregatedMetrics::U64(MetricData::Sum(sum)) => {
@@ -99,7 +122,7 @@ fn startup_fallback_exports_one_logical_operation_without_error_contents() -> cr
                 durations.extend(
                     histogram
                         .data_points()
-                        .map(opentelemetry_sdk::metrics::data::HistogramDataPoint::count),
+                        .map(crate::metrics_data::HistogramDataPoint::count),
                 );
             }
             _ => panic!("unexpected metric"),
@@ -149,8 +172,8 @@ fn startup_fallback_exports_one_logical_operation_without_error_contents() -> cr
     let snapshot = metrics.snapshot()?;
     let mut names: Vec<_> = snapshot
         .scope_metrics()
-        .flat_map(opentelemetry_sdk::metrics::data::ScopeMetrics::metrics)
-        .map(opentelemetry_sdk::metrics::data::Metric::name)
+        .flat_map(crate::metrics_data::ScopeMetrics::metrics)
+        .map(crate::metrics_data::Metric::name)
         .collect();
     names.sort();
     assert_eq!(

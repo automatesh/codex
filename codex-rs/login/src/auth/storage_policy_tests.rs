@@ -1,8 +1,8 @@
 //! Exercises configured storage policy and its emitted metadata.
 
 use super::*;
-use opentelemetry_sdk::metrics::data::AggregatedMetrics;
-use opentelemetry_sdk::metrics::data::MetricData;
+use codex_otel::metrics_data::AggregatedMetrics;
+use codex_otel::metrics_data::MetricData;
 use pretty_assertions::assert_eq;
 
 #[test]
@@ -216,7 +216,7 @@ fn storage_metrics_distinguish_explicit_file_from_secure_failure_fallback() -> a
     let mut actual = Vec::new();
     for metric in snapshot
         .scope_metrics()
-        .flat_map(opentelemetry_sdk::metrics::data::ScopeMetrics::metrics)
+        .flat_map(codex_otel::metrics_data::ScopeMetrics::metrics)
     {
         if metric.name() == "codex.auth_storage.operation"
             && let AggregatedMetrics::U64(MetricData::Sum(sum)) = metric.data()

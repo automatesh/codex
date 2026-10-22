@@ -24,7 +24,6 @@ use crate::state::validate_policy_against_constraints;
 use anyhow::Context;
 use anyhow::Result;
 use codex_utils_absolute_path::AbsolutePathBuf;
-use opentelemetry::trace::SpanContext;
 use serde::Deserialize;
 use serde::Serialize;
 use std::collections::HashMap;
@@ -272,7 +271,6 @@ pub struct NetworkProxyState {
     reloader: Arc<dyn ConfigReloader>,
     blocked_request_observer: Arc<RwLock<Option<Arc<dyn BlockedRequestObserver>>>>,
     pub(crate) policy_audit_observer: Option<NetworkPolicyAuditObserver>,
-    pub(crate) launch_span_context: Option<SpanContext>,
     pub(crate) process_log_metadata: crate::NetworkProxyProcessLogMetadata,
     credential_broker: CredentialBroker,
     audit_metadata: NetworkProxyAuditMetadata,
@@ -311,7 +309,6 @@ impl Clone for NetworkProxyState {
             reloader: self.reloader.clone(),
             blocked_request_observer: self.blocked_request_observer.clone(),
             policy_audit_observer: self.policy_audit_observer.clone(),
-            launch_span_context: self.launch_span_context.clone(),
             process_log_metadata: self.process_log_metadata.clone(),
             credential_broker: self.credential_broker.clone(),
             audit_metadata: self.audit_metadata.clone(),
@@ -415,7 +412,6 @@ impl NetworkProxyState {
             reloader,
             blocked_request_observer: Arc::new(RwLock::new(blocked_request_observer)),
             policy_audit_observer: None,
-            launch_span_context: None,
             process_log_metadata: crate::NetworkProxyProcessLogMetadata::default(),
             audit_metadata,
             execution_attributions: Arc::new(Mutex::new(HashMap::new())),
@@ -491,11 +487,6 @@ impl NetworkProxyState {
     /// Installs a best-effort observer for every final domain and non-domain policy decision.
     pub fn set_policy_audit_observer(&mut self, observer: NetworkPolicyAuditObserver) {
         self.policy_audit_observer = Some(observer);
-    }
-
-    /// Retains the initiating process request's trace reference for network decision logs.
-    pub fn set_launch_span_context(&mut self, span_context: SpanContext) {
-        self.launch_span_context = span_context.is_valid().then_some(span_context);
     }
 
     /// Adds launch-local log fields. Registration IDs must come from the executor, not the peer.

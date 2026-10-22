@@ -2105,7 +2105,6 @@ dependencies = [
  "codex-git-attribution",
  "codex-git-utils",
  "codex-goal-extension",
- "codex-guardian-v2",
  "codex-history-notes-extension",
  "codex-home",
  "codex-hooks",
@@ -2153,8 +2152,6 @@ dependencies = [
  "http 1.4.0",
  "keyring",
  "libc",
- "opentelemetry",
- "opentelemetry_sdk",
  "pretty_assertions",
  "rcgen",
  "rmcp",
@@ -2177,7 +2174,6 @@ dependencies = [
  "toml 0.9.11+spec-1.1.0",
  "toml_edit 0.24.0+spec-1.1.0",
  "tracing",
- "tracing-opentelemetry",
  "tracing-subscriber",
  "url",
  "uuid",
@@ -2804,7 +2800,6 @@ dependencies = [
  "codex-protocol",
  "deno_core_icudata",
  "futures",
- "opentelemetry",
  "pretty_assertions",
  "serde_json",
  "tokio",
@@ -2961,7 +2956,6 @@ dependencies = [
  "codex-file-system",
  "codex-git-utils",
  "codex-guardian-context",
- "codex-guardian-reviewer",
  "codex-history",
  "codex-home",
  "codex-hooks",
@@ -3028,8 +3022,6 @@ dependencies = [
  "maplit",
  "once_cell",
  "openssl-sys",
- "opentelemetry",
- "opentelemetry_sdk",
  "predicates",
  "pretty_assertions",
  "rand 0.9.3",
@@ -3053,7 +3045,6 @@ dependencies = [
  "tonic",
  "tower",
  "tracing",
- "tracing-opentelemetry",
  "tracing-subscriber",
  "tracing-test",
  "url",
@@ -3198,8 +3189,6 @@ dependencies = [
  "core_test_support",
  "insta",
  "libc",
- "opentelemetry",
- "opentelemetry_sdk",
  "owo-colors",
  "predicates",
  "pretty_assertions",
@@ -3209,7 +3198,6 @@ dependencies = [
  "tempfile",
  "tokio",
  "tracing",
- "tracing-opentelemetry",
  "tracing-subscriber",
  "ts-rs",
  "uuid",
@@ -3263,8 +3251,6 @@ dependencies = [
  "futures",
  "http 1.4.0",
  "libc",
- "opentelemetry",
- "opentelemetry_sdk",
  "pretty_assertions",
  "prost",
  "rcgen",
@@ -3281,7 +3267,6 @@ dependencies = [
  "tokio-util",
  "toml 0.9.11+spec-1.1.0",
  "tracing",
- "tracing-opentelemetry",
  "tracing-subscriber",
  "url",
  "uuid",
@@ -3566,69 +3551,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "codex-guardian-reviewer"
-version = "0.163.0"
-dependencies = [
- "anyhow",
- "codex-analytics",
- "codex-extension-api",
- "codex-feedback",
- "codex-guardian-context",
- "codex-mcp",
- "codex-otel",
- "codex-prompts",
- "codex-protocol",
- "opentelemetry",
- "opentelemetry_sdk",
- "pretty_assertions",
- "rand 0.9.3",
- "serde",
- "serde_json",
- "test-case",
- "tokio",
- "tokio-util",
- "tracing",
-]
-
-[[package]]
-name = "codex-guardian-v2"
-version = "0.163.0"
-dependencies = [
- "anyhow",
- "codex-analytics",
- "codex-api",
- "codex-config",
- "codex-context-fragments",
- "codex-core",
- "codex-extension-api",
- "codex-features",
- "codex-guardian-context",
- "codex-guardian-reviewer",
- "codex-history",
- "codex-http-client",
- "codex-login",
- "codex-model-provider",
- "codex-model-provider-info",
- "codex-prompts",
- "codex-protocol",
- "codex-utils-cargo-bin",
- "codex-websocket-client",
- "core_test_support",
- "dirs",
- "http 1.4.0",
- "insta",
- "pretty_assertions",
- "serde_json",
- "tempfile",
- "thiserror 2.0.18",
- "tokio",
- "tracing",
- "uuid",
- "wiremock",
- "zstd",
-]
-
-[[package]]
 name = "codex-history"
 version = "0.163.0"
 dependencies = [
@@ -3717,8 +3639,6 @@ dependencies = [
  "http-body 1.0.1",
  "httpdate",
  "native-tls",
- "opentelemetry",
- "opentelemetry_sdk",
  "pretty_assertions",
  "rcgen",
  "reqwest 0.12.28",
@@ -3735,7 +3655,6 @@ dependencies = [
  "thiserror 2.0.18",
  "tokio",
  "tracing",
- "tracing-opentelemetry",
  "tracing-subscriber",
  "windows-sys 0.61.2",
  "zstd",
@@ -3861,7 +3780,6 @@ dependencies = [
  "jsonwebtoken",
  "keyring",
  "once_cell",
- "opentelemetry_sdk",
  "os_info",
  "pretty_assertions",
  "rand 0.9.3",
@@ -4158,7 +4076,6 @@ dependencies = [
  "codex-windows-sandbox",
  "globset",
  "libc",
- "opentelemetry",
  "pretty_assertions",
  "rama-core",
  "rama-dns",
@@ -4227,10 +4144,6 @@ dependencies = [
  "eventsource-stream",
  "http 1.4.0",
  "libc",
- "opentelemetry",
- "opentelemetry-semantic-conventions",
- "opentelemetry_sdk",
- "os_info",
  "pretty_assertions",
  "reqwest 0.12.28",
  "seccompiler",
@@ -4435,7 +4348,6 @@ dependencies = [
  "libc",
  "memchr",
  "oauth2",
- "opentelemetry_sdk",
  "pretty_assertions",
  "rmcp",
  "serde",
@@ -4620,7 +4532,6 @@ dependencies = [
  "dunce",
  "futures",
  "insta",
- "opentelemetry_sdk",
  "pretty_assertions",
  "schemars 0.8.22",
  "serde",
@@ -4856,7 +4767,6 @@ dependencies = [
  "libc",
  "objc2-app-kit",
  "objc2-foundation",
- "opentelemetry_sdk",
  "pathdiff",
  "pretty_assertions",
  "pulldown-cmark",
@@ -5617,7 +5527,6 @@ dependencies = [
  "codex-exec-server",
  "codex-extension-api",
  "codex-features",
- "codex-guardian-v2",
  "codex-home",
  "codex-hooks",
  "codex-http-client",
@@ -5632,8 +5541,6 @@ dependencies = [
  "ctor 0.6.3",
  "futures",
  "notify",
- "opentelemetry",
- "opentelemetry_sdk",
  "pretty_assertions",
  "regex-lite",
  "serde_json",
@@ -5642,7 +5549,6 @@ dependencies = [
  "tokio",
  "tokio-tungstenite",
  "tracing",
- "tracing-opentelemetry",
  "tracing-subscriber",
  "walkdir",
  "wiremock",
@@ -11104,43 +11010,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "opentelemetry"
-version = "0.31.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b84bcd6ae87133e903af7ef497404dda70c60d0ea14895fc8a5e6722754fc2a0"
-dependencies = [
- "futures-core",
- "futures-sink",
- "js-sys",
- "pin-project-lite",
- "thiserror 2.0.18",
- "tracing",
-]
-
-[[package]]
-name = "opentelemetry-semantic-conventions"
-version = "0.31.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e62e29dfe041afb8ed2a6c9737ab57db4907285d999ef8ad3a59092a36bdc846"
-
-[[package]]
-name = "opentelemetry_sdk"
-version = "0.31.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e14ae4f5991976fd48df6d843de219ca6d31b01daaab2dad5af2badeded372bd"
-dependencies = [
- "futures-channel",
- "futures-executor",
- "futures-util",
- "opentelemetry",
- "percent-encoding",
- "rand 0.9.3",
- "thiserror 2.0.18",
- "tokio",
- "tokio-stream",
-]
-
-[[package]]
 name = "option-ext"
 version = "0.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -15930,22 +15799,6 @@ dependencies = [
  "log",
  "once_cell",
  "tracing-core",
-]
-
-[[package]]
-name = "tracing-opentelemetry"
-version = "0.32.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1ac28f2d093c6c477eaa76b23525478f38de514fa9aeb1285738d4b97a9552fc"
-dependencies = [
- "js-sys",
- "opentelemetry",
- "smallvec",
- "tracing",
- "tracing-core",
- "tracing-log",
- "tracing-subscriber",
- "web-time",
 ]
 
 [[package]]

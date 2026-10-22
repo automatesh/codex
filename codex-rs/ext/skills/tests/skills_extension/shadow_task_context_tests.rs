@@ -1,6 +1,6 @@
 use std::collections::BTreeMap;
 
-use opentelemetry_sdk::metrics::data::ResourceMetrics;
+use codex_otel::metrics_data::ResourceMetrics;
 
 use pretty_assertions::assert_eq;
 
@@ -20,16 +20,16 @@ pub(super) async fn collect_shadow_observations(
             let snapshot = metrics.snapshot()?;
             total += snapshot
                 .scope_metrics()
-                .flat_map(opentelemetry_sdk::metrics::data::ScopeMetrics::metrics)
+                .flat_map(codex_otel::metrics_data::ScopeMetrics::metrics)
                 .find(|metric| metric.name() == name)
                 .map(|metric| match metric.data() {
                     AggregatedMetrics::U64(MetricData::Sum(sum)) => sum
                         .data_points()
-                        .map(opentelemetry_sdk::metrics::data::SumDataPoint::value)
+                        .map(codex_otel::metrics_data::SumDataPoint::value)
                         .sum::<u64>(),
                     AggregatedMetrics::F64(MetricData::Histogram(histogram)) => histogram
                         .data_points()
-                        .map(opentelemetry_sdk::metrics::data::HistogramDataPoint::count)
+                        .map(codex_otel::metrics_data::HistogramDataPoint::count)
                         .sum::<u64>(),
                     data => panic!("unexpected shadow metric data: {data:?}"),
                 })
@@ -215,7 +215,7 @@ async fn task_context_recovers_prior_requests_and_explicit_intent_without_changi
     let actual = snapshots
         .iter()
         .flat_map(ResourceMetrics::scope_metrics)
-        .flat_map(opentelemetry_sdk::metrics::data::ScopeMetrics::metrics)
+        .flat_map(codex_otel::metrics_data::ScopeMetrics::metrics)
         .filter(|metric| metric.name() == "codex.skills.shadow_selection.invocation")
         .flat_map(|metric| match metric.data() {
             AggregatedMetrics::U64(MetricData::Sum(sum)) => sum.data_points(),

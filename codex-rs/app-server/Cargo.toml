@@ -53,7 +53,6 @@ codex-external-agent-migration = { workspace = true }
 codex-features = { workspace = true }
 codex-goal-extension = { workspace = true }
 codex-git-attribution = { workspace = true }
-codex-guardian-v2 = { workspace = true }
 codex-git-utils = { workspace = true }
 codex-file-watcher = { workspace = true }
 codex-hooks = { workspace = true }
@@ -144,8 +143,6 @@ flate2 = { workspace = true }
 hmac = { workspace = true }
 http = { workspace = true }
 keyring = { workspace = true }
-opentelemetry = { workspace = true }
-opentelemetry_sdk = { workspace = true }
 pretty_assertions = { workspace = true }
 rcgen = { workspace = true }
 rmcp = { workspace = true, default-features = false, features = [
@@ -160,5 +157,4 @@ tar = { workspace = true }
 test-case = "3.3.1"
 tokio-rustls = { workspace = true }
 tokio-tungstenite = { workspace = true }
-tracing-opentelemetry = { workspace = true }
 wiremock = { workspace = true }

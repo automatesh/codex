@@ -3885,6 +3885,12 @@ impl Config {
             );
             approvals_reviewer = constrained_approvals_reviewer.value();
         }
+        if approvals_reviewer == ApprovalsReviewer::AutoReview {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidInput,
+                "Guardian is not included in this build; approvals_reviewer=auto_review is unavailable",
+            ));
+        }
         let web_search_mode =
             resolve_web_search_mode(&cfg, &features).unwrap_or(WebSearchMode::Cached);
         let web_search_config = resolve_web_search_config(&cfg);

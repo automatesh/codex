@@ -6,7 +6,6 @@ use std::sync::atomic::Ordering;
 use codex_exec_server_protocol::JSONRPCErrorError;
 use codex_exec_server_protocol::RequestId;
 use codex_http_client::HttpClientFactory;
-use opentelemetry::trace::SpanContext;
 use serde_json::to_value;
 use std::collections::HashSet;
 use tokio::sync::Mutex;
@@ -186,18 +185,13 @@ impl ExecServerHandler {
         Ok(())
     }
 
-    pub(crate) async fn exec(
-        &self,
-        params: ExecParams,
-        launch_context: Option<SpanContext>,
-    ) -> Result<ExecResponse, JSONRPCErrorError> {
+    pub(crate) async fn exec(&self, params: ExecParams) -> Result<ExecResponse, JSONRPCErrorError> {
         let session = self.require_initialized_for("exec")?;
         session
             .process()
             .exec(
                 params,
                 crate::process_telemetry::ProcessTelemetry {
-                    launch_context,
                     executor_registration: self.executor_registration.clone(),
                     ..Default::default()
                 },

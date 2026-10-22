@@ -383,9 +383,6 @@ async fn prepare_managed_network(
     if let Some(observer) = network_policy_audit_observer {
         state.set_policy_audit_observer(observer);
     }
-    if let Some(launch_context) = &telemetry.launch_context {
-        state.set_launch_span_context(launch_context.clone());
-    }
     state.set_process_log_metadata(codex_network_proxy::NetworkProxyProcessLogMetadata {
         thread_id: telemetry.thread_id.clone(),
         tool_call_id: telemetry.tool_call_id.clone(),

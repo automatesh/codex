@@ -1,7 +1,7 @@
 use super::*;
 use crate::MetricsConfig;
-use opentelemetry_sdk::metrics::data::AggregatedMetrics;
-use opentelemetry_sdk::metrics::data::MetricData;
+use crate::metrics_data::AggregatedMetrics;
+use crate::metrics_data::MetricData;
 use pretty_assertions::assert_eq;
 use std::sync::Barrier;
 use std::sync::RwLock;
@@ -29,13 +29,13 @@ fn totals(metrics: &MetricsClient) -> (u64, u64, f64) {
     let mut totals = (0, 0, 0.0);
     for metric in snapshot
         .scope_metrics()
-        .flat_map(opentelemetry_sdk::metrics::data::ScopeMetrics::metrics)
+        .flat_map(crate::metrics_data::ScopeMetrics::metrics)
     {
         match metric.data() {
             AggregatedMetrics::U64(MetricData::Sum(sum)) => {
                 totals.0 += sum
                     .data_points()
-                    .map(opentelemetry_sdk::metrics::data::SumDataPoint::value)
+                    .map(crate::metrics_data::SumDataPoint::value)
                     .sum::<u64>();
             }
             AggregatedMetrics::F64(MetricData::Histogram(histogram)) => {

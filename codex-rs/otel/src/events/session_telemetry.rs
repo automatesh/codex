@@ -33,6 +33,7 @@ use crate::metrics::WEBSOCKET_REQUEST_COUNT_METRIC;
 use crate::metrics::WEBSOCKET_REQUEST_DURATION_METRIC;
 use crate::metrics::runtime_metrics::RuntimeMetricsSummary;
 use crate::metrics::timer::Timer;
+use crate::metrics_data::ResourceMetrics;
 use crate::provider::OtelProvider;
 use crate::sanitize_metric_tag_value;
 use crate::tool_result::ToolResultEvent;
@@ -57,7 +58,6 @@ use codex_protocol::protocol::TokenUsage;
 use codex_protocol::user_input::UserInput;
 use eventsource_stream::Event as StreamEvent;
 use eventsource_stream::EventStreamError as StreamError;
-use opentelemetry_sdk::metrics::data::ResourceMetrics;
 use reqwest::Error;
 use reqwest::Response;
 use std::future::Future;
@@ -142,40 +142,32 @@ pub fn bounded_product_sku(product_sku: Option<&str>) -> Option<&'static str> {
 }
 
 impl SessionTelemetry {
-    pub fn with_tool_result_log_config(mut self, config: ToolResultLogConfig) -> Self {
-        self.tool_result_log_config = config;
+    pub fn with_tool_result_log_config(self, _config: ToolResultLogConfig) -> Self {
         self
     }
 
-    pub fn with_auth_env(mut self, auth_env: AuthEnvTelemetryMetadata) -> Self {
-        self.metadata.auth_env = auth_env;
+    pub fn with_auth_env(self, _auth_env: AuthEnvTelemetryMetadata) -> Self {
         self
     }
 
-    pub fn with_model(mut self, model: &str, slug: &str) -> Self {
-        self.metadata.model = model.to_owned();
-        self.metadata.slug = slug.to_owned();
+    pub fn with_model(self, _model: &str, _slug: &str) -> Self {
         self
     }
 
     pub fn with_inference_request(
-        mut self,
-        service_tier: Option<&str>,
-        model_reasoning_effort: Option<&ReasoningEffort>,
+        self,
+        _service_tier: Option<&str>,
+        _model_reasoning_effort: Option<&ReasoningEffort>,
     ) -> Self {
-        self.metadata.service_tier = service_tier.map(str::to_owned);
-        self.metadata.model_reasoning_effort = model_reasoning_effort.map(ToString::to_string);
         self
     }
 
-    pub fn with_metrics_service_name(mut self, service_name: &str) -> Self {
-        self.metadata.service_name = Some(sanitize_metric_tag_value(service_name));
+    pub fn with_metrics_service_name(self, _service_name: &str) -> Self {
         self
     }
 
     /// Attributes bounded telemetry without turning arbitrary configuration into metric labels.
-    pub fn with_product_sku(mut self, product_sku: Option<&str>) -> Self {
-        self.metadata.product_sku = bounded_product_sku(product_sku);
+    pub fn with_product_sku(self, _product_sku: Option<&str>) -> Self {
         self
     }
 
@@ -585,95 +577,45 @@ impl SessionTelemetry {
 
     #[allow(clippy::too_many_arguments)]
     pub fn new(
-        conversation_id: ThreadId,
-        model: &str,
-        slug: &str,
-        account_id: Option<String>,
-        account_email: Option<String>,
-        auth_mode: Option<TelemetryAuthMode>,
-        originator: String,
-        log_user_prompts: bool,
-        terminal_type: String,
-        session_source: SessionSource,
+        _conversation_id: ThreadId,
+        _model: &str,
+        _slug: &str,
+        _account_id: Option<String>,
+        _account_email: Option<String>,
+        _auth_mode: Option<TelemetryAuthMode>,
+        _originator: String,
+        _log_user_prompts: bool,
+        _terminal_type: String,
+        _session_source: SessionSource,
     ) -> SessionTelemetry {
-        let agent_name = session_source
-            .get_agent_path()
-            .map(|path| path.to_string())
-            .or_else(|| session_source.get_nickname())
-            .unwrap_or_else(|| {
-                if session_source.is_non_root_agent() {
-                    conversation_id.to_string()
-                } else {
-                    AgentPath::ROOT.to_string()
-                }
-            });
         Self {
             tool_result_log_config: ToolResultLogConfig::default(),
             metadata: SessionTelemetryMetadata {
-                conversation_id,
-                agent_name,
-                auth_mode: auth_mode.map(|m| m.to_string()),
+                conversation_id: ThreadId::from_u128(0),
+                agent_name: String::new(),
+                auth_mode: None,
                 auth_env: AuthEnvTelemetryMetadata::default(),
-                account_id,
+                account_id: None,
                 user_id: None,
-                account_email,
-                originator: sanitize_metric_tag_value(originator.as_str()),
+                account_email: None,
+                originator: String::new(),
                 product_sku: None,
                 service_name: None,
-                session_source: session_source.to_string(),
-                model: model.to_owned(),
-                slug: slug.to_owned(),
+                session_source: String::new(),
+                model: String::new(),
+                slug: String::new(),
                 service_tier: None,
                 model_reasoning_effort: None,
-                log_user_prompts,
-                app_version: env!("CARGO_PKG_VERSION"),
-                terminal_type,
+                log_user_prompts: false,
+                app_version: "",
+                terminal_type: String::new(),
             },
-            metrics: crate::metrics::global(),
+            metrics: None,
             metrics_use_metadata_tags: true,
         }
     }
 
-    pub fn record_responses(&self, handle_responses_span: &Span, event: &ResponseEvent) {
-        handle_responses_span.record("otel.name", SessionTelemetry::responses_type(event));
-
-        match event {
-            ResponseEvent::OutputItemDone(item) => {
-                handle_responses_span.record("from", "output_item_done");
-                if let ResponseItem::FunctionCall { name, .. } = item {
-                    handle_responses_span.record("tool_name", name.as_str());
-                }
-            }
-            ResponseEvent::OutputItemAdded(item) => {
-                handle_responses_span.record("from", "output_item_added");
-                if let ResponseItem::FunctionCall { name, .. } = item {
-                    handle_responses_span.record("tool_name", name.as_str());
-                }
-            }
-            ResponseEvent::Completed {
-                token_usage: Some(token_usage),
-                ..
-            } => {
-                handle_responses_span.record("gen_ai.usage.input_tokens", token_usage.input_tokens);
-                handle_responses_span.record(
-                    "gen_ai.usage.cache_read.input_tokens",
-                    token_usage.cached_input(),
-                );
-                handle_responses_span.record(
-                    "gen_ai.usage.cache_write.input_tokens",
-                    token_usage.cache_write_input_tokens,
-                );
-                handle_responses_span
-                    .record("gen_ai.usage.output_tokens", token_usage.output_tokens);
-                handle_responses_span.record(
-                    "codex.usage.reasoning_output_tokens",
-                    token_usage.reasoning_output_tokens,
-                );
-                handle_responses_span.record("codex.usage.total_tokens", token_usage.total_tokens);
-            }
-            _ => {}
-        }
-    }
+    pub fn record_responses(&self, _handle_responses_span: &Span, _event: &ResponseEvent) {}
 
     #[allow(clippy::too_many_arguments)]
     pub fn conversation_starts(
@@ -1149,107 +1091,25 @@ impl SessionTelemetry {
         );
     }
 
-    pub fn user_prompt(&self, items: &[UserInput]) {
-        let prompt = items
-            .iter()
-            .flat_map(|item| match item {
-                UserInput::Text { text, .. } => Some(text.as_str()),
-                _ => None,
-            })
-            .collect::<String>();
-        let text_input_count = items
-            .iter()
-            .filter(|item| matches!(item, UserInput::Text { .. }))
-            .count();
-        let image_input_count = items
-            .iter()
-            .filter(|item| matches!(item, UserInput::Image { .. }))
-            .count();
-        let local_image_input_count = items
-            .iter()
-            .filter(|item| matches!(item, UserInput::LocalImage { .. }))
-            .count();
-
-        let prompt_to_log = if self.metadata.log_user_prompts {
-            prompt.as_str()
-        } else {
-            "[REDACTED]"
-        };
-
-        log_event!(
-            self,
-            event.name = "codex.user_prompt",
-            prompt_length = %prompt.chars().count(),
-            prompt = %prompt_to_log,
-        );
-        trace_event!(
-            self,
-            event.name = "codex.user_prompt",
-            prompt_length = %prompt.chars().count(),
-            text_input_count = text_input_count as i64,
-            image_input_count = image_input_count as i64,
-            local_image_input_count = local_image_input_count as i64,
-        );
-    }
+    pub fn user_prompt(&self, _items: &[UserInput]) {}
 
     pub fn tool_decision(
         &self,
-        tool_name: &ToolName,
-        call_id: &str,
-        decision: &ReviewDecision,
-        source: Option<ToolDecisionSource>,
+        _tool_name: &ToolName,
+        _call_id: &str,
+        _decision: &ReviewDecision,
+        _source: Option<ToolDecisionSource>,
     ) {
-        let tool_namespace = crate::events::shared::tool_namespace(tool_name);
-        match source {
-            Some(source) => log_event!(
-                self,
-                event.name = "codex.tool_decision",
-                tool_name = %tool_name.name,
-                tool_namespace = %tool_namespace,
-                call_id = %call_id,
-                decision = %decision.to_opaque_string(),
-                source = %source.to_string(),
-            ),
-            None => log_event!(
-                self,
-                event.name = "codex.tool_decision",
-                tool_name = %tool_name.name,
-                tool_namespace = %tool_namespace,
-                call_id = %call_id,
-                decision = %decision.to_opaque_string(),
-            ),
-        }
     }
 
     pub fn sandbox_outcome(
         &self,
-        tool_name: &str,
-        call_id: &str,
-        outcome: &str,
-        initial_duration: Duration,
-        escalated_duration: Option<Duration>,
+        _tool_name: &str,
+        _call_id: &str,
+        _outcome: &str,
+        _initial_duration: Duration,
+        _escalated_duration: Option<Duration>,
     ) {
-        let initial_duration_ms = initial_duration.as_millis().min(i64::MAX as u128) as i64;
-        let escalated_duration_ms =
-            escalated_duration.map(|duration| duration.as_millis().min(i64::MAX as u128) as i64);
-        log_event!(
-            self,
-            event.name = "codex.sandbox_outcome",
-            tool_name = %tool_name,
-            call_id = %call_id,
-            outcome = %outcome,
-            initial_duration_ms = initial_duration_ms,
-            escalated_duration_ms = escalated_duration_ms,
-        );
-        trace_event!(
-            self,
-            event.name = "codex.sandbox_outcome",
-            tool_name = %tool_name,
-            call_id = %call_id,
-            outcome = %outcome,
-            initial_duration_ms = initial_duration_ms,
-            escalated_duration_ms = escalated_duration_ms,
-        );
     }
 
     /// Records a diagnostic representation and returns the original result. The temporary
@@ -1296,43 +1156,15 @@ impl SessionTelemetry {
     #[allow(clippy::too_many_arguments)]
     pub fn tool_result_with_tags(
         &self,
-        tool_name: &ToolName,
-        call_id: &str,
-        arguments: &str,
-        duration: Duration,
-        success: bool,
-        output: &str,
-        extra_tags: &[(&str, &str)],
-        extra_trace_fields: &[(&str, &str)],
+        _tool_name: &ToolName,
+        _call_id: &str,
+        _arguments: &str,
+        _duration: Duration,
+        _success: bool,
+        _output: &str,
+        _extra_tags: &[(&str, &str)],
+        _extra_trace_fields: &[(&str, &str)],
     ) {
-        let flat_tool_name = tool_name.to_string();
-        let success_str = if success { "true" } else { "false" };
-        let mut tags = Vec::with_capacity(3 + extra_tags.len());
-        tags.push(("tool", flat_tool_name.as_str()));
-        tags.push(("success", success_str));
-        tags.extend_from_slice(extra_tags);
-        if let Some(product_sku) = self.metadata.product_sku {
-            tags.push(("product_sku", product_sku));
-        }
-        self.counter(TOOL_CALL_COUNT_METRIC, /*inc*/ 1, &tags);
-        self.record_duration(TOOL_CALL_DURATION_METRIC, duration, &tags);
-        let mcp_server = trace_field_value(extra_trace_fields, "mcp_server").unwrap_or("");
-        let mcp_server_origin =
-            trace_field_value(extra_trace_fields, "mcp_server_origin").unwrap_or("");
-        emit_tool_result(
-            self,
-            self.tool_result_log_config,
-            ToolResultEvent {
-                tool_name,
-                call_id,
-                arguments,
-                mcp_server,
-                mcp_server_origin,
-                duration,
-                success,
-                output,
-            },
-        );
     }
 
     fn record_responses_websocket_timing_metrics(&self, value: &serde_json::Value) {

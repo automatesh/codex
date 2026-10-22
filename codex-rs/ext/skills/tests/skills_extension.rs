@@ -40,6 +40,9 @@ use codex_otel::THREAD_SKILLS_DESCRIPTION_TRUNCATED_CHARS_METRIC;
 use codex_otel::THREAD_SKILLS_ENABLED_TOTAL_METRIC;
 use codex_otel::THREAD_SKILLS_KEPT_TOTAL_METRIC;
 use codex_otel::THREAD_SKILLS_TRUNCATED_METRIC;
+use codex_otel::metrics_data::AggregatedMetrics;
+use codex_otel::metrics_data::InMemoryMetricExporter;
+use codex_otel::metrics_data::MetricData;
 use codex_protocol::capabilities::CapabilityRootLocation;
 use codex_protocol::capabilities::SelectedCapabilityRoot;
 use codex_protocol::openai_models::ModelInfo;
@@ -80,9 +83,6 @@ use codex_skills_extension::provider::SkillReadRequest;
 use codex_skills_extension::provider::SkillSearchRequest;
 use codex_utils_absolute_path::AbsolutePathBuf;
 use codex_utils_path_uri::PathUri;
-use opentelemetry_sdk::metrics::InMemoryMetricExporter;
-use opentelemetry_sdk::metrics::data::AggregatedMetrics;
-use opentelemetry_sdk::metrics::data::MetricData;
 use pretty_assertions::assert_eq;
 
 type TestResult = Result<(), Box<dyn std::error::Error>>;
@@ -918,13 +918,13 @@ async fn shadow_selection_uses_host_catalog_when_instructions_are_disabled() -> 
     .await?;
     let catalog_entry_counts = snapshots
         .iter()
-        .flat_map(opentelemetry_sdk::metrics::data::ResourceMetrics::scope_metrics)
-        .flat_map(opentelemetry_sdk::metrics::data::ScopeMetrics::metrics)
+        .flat_map(codex_otel::metrics_data::ResourceMetrics::scope_metrics)
+        .flat_map(codex_otel::metrics_data::ScopeMetrics::metrics)
         .filter(|metric| metric.name() == "codex.skills.shadow_selection.catalog_entries")
         .flat_map(|metric| match metric.data() {
             AggregatedMetrics::F64(MetricData::Histogram(histogram)) => histogram
                 .data_points()
-                .map(opentelemetry_sdk::metrics::data::HistogramDataPoint::sum),
+                .map(codex_otel::metrics_data::HistogramDataPoint::sum),
             data => panic!("unexpected shadow catalog metric data: {data:?}"),
         })
         .collect::<Vec<_>>();
@@ -1035,8 +1035,8 @@ async fn shadow_lru_selector_recovers_a_skill_invoked_on_an_earlier_turn() -> Te
     .await?;
     let selector_hits = snapshots
         .iter()
-        .flat_map(opentelemetry_sdk::metrics::data::ResourceMetrics::scope_metrics)
-        .flat_map(opentelemetry_sdk::metrics::data::ScopeMetrics::metrics)
+        .flat_map(codex_otel::metrics_data::ResourceMetrics::scope_metrics)
+        .flat_map(codex_otel::metrics_data::ScopeMetrics::metrics)
         .filter(|metric| metric.name() == "codex.skills.shadow_selection.invocation")
         .flat_map(|metric| match metric.data() {
             AggregatedMetrics::U64(MetricData::Sum(sum)) => sum.data_points(),

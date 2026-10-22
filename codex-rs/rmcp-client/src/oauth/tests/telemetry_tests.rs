@@ -4,8 +4,8 @@ use super::persistor_tests::authorization_manager_for;
 use super::persistor_tests::test_context;
 use super::*;
 use codex_otel::auth_storage::AuthStorageOriginator;
-use opentelemetry_sdk::metrics::data::AggregatedMetrics;
-use opentelemetry_sdk::metrics::data::MetricData;
+use codex_otel::metrics_data::AggregatedMetrics;
+use codex_otel::metrics_data::MetricData;
 use pretty_assertions::assert_eq;
 use std::collections::BTreeMap;
 
@@ -138,7 +138,7 @@ fn operation_metrics(metrics: &codex_otel::MetricsClient) -> Result<Vec<MetricRe
     let mut actual = Vec::new();
     for metric in snapshot
         .scope_metrics()
-        .flat_map(opentelemetry_sdk::metrics::data::ScopeMetrics::metrics)
+        .flat_map(codex_otel::metrics_data::ScopeMetrics::metrics)
     {
         if matches!(
             metric.name(),

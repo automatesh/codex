@@ -585,7 +585,7 @@ async fn allowed_tools_filter_sources_before_code_mode_and_discovery() {
 #[tokio::test]
 async fn reviewer_tool_policy_exclude_optional_core_tools() {
     let (mut session, mut turn) = make_session_and_context().await;
-    session.tool_policy = Arc::new(codex_guardian_reviewer::reviewer_tool_policy());
+    session.tool_policy = Arc::new(crate::guardian::reviewer_tool_policy());
     set_feature(&mut turn, Feature::ViewImage, /*enabled*/ true);
     Arc::make_mut(&mut turn.config).update_plan_enabled = true;
     turn.multi_agent_version = MultiAgentVersion::V2;
@@ -622,7 +622,7 @@ async fn reviewer_tool_policy_respect_managed_shell_restrictions() {
         (None, ConfigShellToolType::Disabled),
     ] {
         let (mut session, mut turn) = make_session_and_context().await;
-        session.tool_policy = Arc::new(codex_guardian_reviewer::reviewer_tool_policy());
+        session.tool_policy = Arc::new(crate::guardian::reviewer_tool_policy());
         set_feature(&mut turn, Feature::ViewImage, /*enabled*/ true);
         set_feature(&mut turn, Feature::CodeMode, /*enabled*/ true);
         if let Some(feature) = disabled_feature {
@@ -675,7 +675,7 @@ async fn reviewer_tool_policy_respect_managed_shell_restrictions() {
 #[tokio::test]
 async fn reviewer_tool_policy_preserve_code_mode() {
     let (mut session, mut turn) = make_session_and_context().await;
-    session.tool_policy = Arc::new(codex_guardian_reviewer::reviewer_tool_policy());
+    session.tool_policy = Arc::new(crate::guardian::reviewer_tool_policy());
     set_feature(&mut turn, Feature::CodeMode, /*enabled*/ true);
     let turn = Arc::new(turn);
     let step_context = StepContext::for_test(Arc::clone(&turn));
@@ -719,7 +719,7 @@ async fn reviewer_tool_policy_require_managed_secondary_environments() {
         ),
     ] {
         let (mut session, mut turn) = make_session_and_context().await;
-        session.tool_policy = Arc::new(codex_guardian_reviewer::reviewer_tool_policy());
+        session.tool_policy = Arc::new(crate::guardian::reviewer_tool_policy());
         set_feature(&mut turn, Feature::ViewImage, /*enabled*/ true);
         let TurnEnvironmentState::Ready(primary) = turn
             .initial_environments

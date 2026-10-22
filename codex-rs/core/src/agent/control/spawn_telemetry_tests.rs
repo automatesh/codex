@@ -2,11 +2,11 @@ use super::*;
 use codex_otel::MULTI_AGENT_SPAWN_PHASE_DURATION_METRIC;
 use codex_otel::MetricsClient;
 use codex_otel::MetricsConfig;
+use codex_otel::metrics_data::AggregatedMetrics;
+use codex_otel::metrics_data::InMemoryMetricExporter;
+use codex_otel::metrics_data::MetricData;
 use codex_protocol::ThreadId;
 use codex_protocol::protocol::SessionSource;
-use opentelemetry_sdk::metrics::InMemoryMetricExporter;
-use opentelemetry_sdk::metrics::data::AggregatedMetrics;
-use opentelemetry_sdk::metrics::data::MetricData;
 use pretty_assertions::assert_eq;
 use std::collections::BTreeMap;
 
@@ -55,7 +55,7 @@ fn records_bounded_spawn_phase_metrics() {
     let snapshot = metrics.snapshot().expect("snapshot spawn metrics");
     let metric = snapshot
         .scope_metrics()
-        .flat_map(opentelemetry_sdk::metrics::data::ScopeMetrics::metrics)
+        .flat_map(codex_otel::metrics_data::ScopeMetrics::metrics)
         .find(|metric| metric.name() == MULTI_AGENT_SPAWN_PHASE_DURATION_METRIC)
         .expect("spawn phase metric");
     let AggregatedMetrics::F64(MetricData::Histogram(histogram)) = metric.data() else {

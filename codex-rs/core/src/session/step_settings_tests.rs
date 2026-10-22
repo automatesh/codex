@@ -7,7 +7,6 @@ use crate::session::tests::make_session_configuration_for_tests;
 use codex_config::ConfigLayerStack;
 use codex_config::RequirementSource;
 use codex_config::Sourced;
-use codex_features::Feature;
 use codex_models_manager::manager::StaticModelsManager;
 use codex_models_manager::model_info::model_info_from_slug;
 use codex_prompts::render_model_instructions;
@@ -146,17 +145,13 @@ async fn proposed_permission_profile_is_checked_before_step_settings() {
 }
 
 #[tokio::test]
-async fn model_review_requirement_uses_the_proposed_permission_profile() {
+async fn model_review_requirement_is_unavailable_with_any_permission_profile() {
     let mut configuration = make_session_configuration_for_tests().await;
     configuration.permission_profile_state = PermissionProfileState::from_constrained_legacy(
         Constrained::allow_any(PermissionProfile::Disabled),
     )
     .unwrap();
     Arc::make_mut(&mut configuration.step_settings).approvals_reviewer = ApprovalsReviewer::User;
-    Arc::make_mut(&mut configuration.original_config_do_not_use)
-        .features
-        .enable(Feature::GuardianApproval)
-        .unwrap();
     let mut requirements = configuration
         .original_config_do_not_use
         .config_layer_stack
@@ -185,30 +180,12 @@ async fn model_review_requirement_uses_the_proposed_permission_profile() {
             model: "protected-model".to_string()
         }),
     );
-    let updated = configuration
-        .apply(
-            &SessionSettingsUpdate {
-                permission_profile: Some(PermissionProfile::read_only()),
-                ..updates
-            },
-            &[],
-        )
-        .expect("the proposed restricted profile permits the protected model");
     assert_eq!(
-        updated.step_settings.as_ref(),
-        &StepSettings {
-            collaboration_mode,
-            approvals_reviewer: ApprovalsReviewer::AutoReview,
-            ..configuration.step_settings.as_ref().clone()
-        }
-    );
-    assert_eq!(updated.permission_profile(), PermissionProfile::read_only());
-    assert_eq!(
-        updated
+        configuration
             .apply(
                 &SessionSettingsUpdate {
-                    permission_profile: Some(PermissionProfile::Disabled),
-                    ..Default::default()
+                    permission_profile: Some(PermissionProfile::read_only()),
+                    ..updates
                 },
                 &[],
             )
@@ -252,10 +229,6 @@ async fn environment_only_update_revalidates_existing_step_settings() {
         /*developer_instructions*/ None,
     );
     settings.approvals_reviewer = ApprovalsReviewer::AutoReview;
-    Arc::make_mut(&mut configuration.original_config_do_not_use)
-        .features
-        .enable(Feature::GuardianApproval)
-        .unwrap();
     let mut requirements = configuration
         .original_config_do_not_use
         .config_layer_stack
@@ -268,7 +241,12 @@ async fn environment_only_update_revalidates_existing_step_settings() {
     set_requirements(&mut configuration, requirements);
 
     let environments = vec![local(configuration.cwd().clone())];
-    assert_eq!(configuration.validate(&environments), Ok(()));
+    assert_eq!(
+        configuration.validate(&environments),
+        Err(ConstraintError::AutoReviewRequired {
+            model: "protected-model".to_string(),
+        })
+    );
     // Removing the selected workspace also removes its read-only carveout,
     // leaving this profile with full-disk write access.
     assert_eq!(

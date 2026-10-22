@@ -2,15 +2,10 @@
 //! Tool-call provenance is separate from the item's display identity.
 
 use codex_protocol::protocol::ReviewDecision;
-use std::sync::Arc;
-use tokio_util::sync::CancellationToken;
 
-use super::ApprovalRequestReasons;
 use super::GuardianApprovalRequest;
 use super::GuardianReviewContext;
-use super::GuardianReviewOptions;
 use super::approval_request::guardian_approval_request_to_json;
-use crate::session::session::Session;
 
 /// Carries the original action even when the legacy synchronous renderer cannot handle its paths.
 /// This lets the extension return AskUser before invoking that renderer.
@@ -93,14 +88,4 @@ impl ReviewAction {
         }
         Ok(request)
     }
-}
-
-#[derive(Clone)]
-pub(super) struct ReviewRuntime {
-    pub(super) session: Arc<Session>,
-    pub(super) history_reset: CancellationToken,
-    pub(super) context: GuardianReviewContext,
-    pub(super) request: ReviewAction,
-    pub(super) reasons: ApprovalRequestReasons,
-    pub(super) options: GuardianReviewOptions,
 }

@@ -1075,6 +1075,11 @@ mod tests {
     use codex_otel::HOOK_RUN_METRIC;
     use codex_otel::MetricsClient;
     use codex_otel::MetricsConfig;
+    use codex_otel::metrics_data::AggregatedMetrics;
+    use codex_otel::metrics_data::HistogramDataPoint;
+    use codex_otel::metrics_data::InMemoryMetricExporter;
+    use codex_otel::metrics_data::MetricData;
+    use codex_otel::metrics_data::SumDataPoint;
     use codex_protocol::models::ContentItem;
     use codex_protocol::protocol::HookEventName;
     use codex_protocol::protocol::HookExecutionMode;
@@ -1082,11 +1087,6 @@ mod tests {
     use codex_protocol::protocol::HookRunStatus;
     use codex_protocol::protocol::HookScope;
     use codex_protocol::protocol::HookSource;
-    use opentelemetry_sdk::metrics::InMemoryMetricExporter;
-    use opentelemetry_sdk::metrics::data::AggregatedMetrics;
-    use opentelemetry_sdk::metrics::data::HistogramDataPoint;
-    use opentelemetry_sdk::metrics::data::MetricData;
-    use opentelemetry_sdk::metrics::data::SumDataPoint;
     use pretty_assertions::assert_eq;
 
     use super::additional_context_messages;
@@ -1219,7 +1219,7 @@ mod tests {
         let snapshot = metrics.snapshot().expect("metrics snapshot");
         let counter = snapshot
             .scope_metrics()
-            .flat_map(opentelemetry_sdk::metrics::data::ScopeMetrics::metrics)
+            .flat_map(codex_otel::metrics_data::ScopeMetrics::metrics)
             .find(|metric| metric.name() == HOOK_RUN_METRIC)
             .expect("hook run counter");
         let AggregatedMetrics::U64(MetricData::Sum(sum)) = counter.data() else {
@@ -1229,7 +1229,7 @@ mod tests {
 
         let duration = snapshot
             .scope_metrics()
-            .flat_map(opentelemetry_sdk::metrics::data::ScopeMetrics::metrics)
+            .flat_map(codex_otel::metrics_data::ScopeMetrics::metrics)
             .find(|metric| metric.name() == HOOK_RUN_DURATION_METRIC)
             .expect("hook run duration histogram");
         let AggregatedMetrics::F64(MetricData::Histogram(histogram)) = duration.data() else {

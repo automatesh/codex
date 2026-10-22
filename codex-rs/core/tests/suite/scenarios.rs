@@ -123,33 +123,11 @@ mod agent_eviction;
 #[path = "scenarios_partial_answers.rs"]
 mod partial_answers;
 
-#[path = "scenarios_guardian_sender_context.rs"]
-mod guardian_sender_context;
-
-#[path = "scenarios_guardian_extra_policy.rs"]
-mod guardian_extra_policy;
-
-#[path = "scenarios_guardian_orchestrator_connector.rs"]
-mod guardian_orchestrator_connector;
-
-#[path = "scenarios_guardian_conversation_history_tests.rs"]
-mod guardian_conversation_history;
-
 #[path = "scenarios_indirect_namespace_prefixes.rs"]
 mod indirect_namespace_prefixes;
 
 #[path = "scenarios_mcp_resource_messages.rs"]
 mod mcp_resource_messages;
-
-#[path = "scenarios_guardian_agent_messages_tests.rs"]
-mod guardian_agent_messages;
-
-#[cfg(not(target_os = "windows"))]
-#[path = "scenarios_guardian_handoff.rs"]
-mod guardian_handoff;
-
-#[path = "scenarios_guardian_heartbeat.rs"]
-mod guardian_heartbeat;
 
 #[path = "scenarios_preparation.rs"]
 mod preparation;
@@ -1891,64 +1869,6 @@ async fn subagent_browser_auth_resolves_user_prompt() -> Result<()> {
     Ok(())
 }
 
-#[cfg(not(target_os = "windows"))]
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn guardian_code_mode_messaging_request_history() -> Result<()> {
-    skip_if_no_network!(Ok(()));
-    skip_if_wine_exec!(
-        Ok(()),
-        "Guardian approval actions require host-native paths"
-    );
-    let mut requests =
-        super::guardian_subagent_authorization::code_mode_guardian_request_history().await?;
-    let root =
-        requests.first().expect("root model request").body_json()["client_metadata"]["thread_id"]
-            .clone();
-    requests.sort_by_key(|request| {
-        let body = request.body_json();
-        let metadata = &body["client_metadata"];
-        if metadata["x-openai-subagent"] == "guardian" {
-            2
-        } else {
-            usize::from(metadata["thread_id"] != root)
-        }
-    });
-    let mut snapshot = context_snapshot::format_request_history_snapshot(
-        "A root uses Code Mode to send a confirmation and receives a real user reply; a worker then requests an action that Guardian reviews with the confirmed question as assistant context. Independent model streams are grouped as root, worker, then Guardian.",
-        &requests,
-        &ContextSnapshotOptions::default().rewrite_known_segments(),
-    );
-    for (pattern, replacement) in [
-        (
-            r#"(?m)^(\s*"environment_id": )"(?:local|remote)""#,
-            "$1\"<ENVIRONMENT>\"",
-        ),
-        (
-            r#"(For this action on environment )"(?:local|remote)","#,
-            "$1\"<ENVIRONMENT>\",",
-        ),
-        (r#"(?m)^(\s*"cwd": )"[^"]*""#, "$1\"<CWD>\""),
-        (
-            r#""command": \[\s*(?:"[^"]*",\s*)*"true"\s*\]"#,
-            "\"command\": [\"<SHELL>\", \"true\"]",
-        ),
-        (
-            r#"\{"type":"text","text":"Message sent\."\}"#,
-            r#"{"text":"Message sent.","type":"text"}"#,
-        ),
-        (
-            r#"\{"cmd":"true","sandbox_permissions":"require_escalated","justification":"Review the production deployment\."\}"#,
-            r#"{"cmd":"true","justification":"Review the production deployment.","sandbox_permissions":"require_escalated"}"#,
-        ),
-    ] {
-        snapshot = regex_lite::Regex::new(pattern)?
-            .replace_all(&snapshot, replacement)
-            .into_owned();
-    }
-    insta::assert_snapshot!("guardian_code_mode_messaging", snapshot);
-    Ok(())
-}
-
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn subagent_waits_for_its_inherited_environment_configuration() -> Result<()> {
     skip_if_no_network!(Ok(()));
@@ -2102,42 +2022,6 @@ async fn prediction_fork_preserves_context_above_compaction_threshold() -> Resul
         &requests,
         &ContextSnapshotOptions::default().include_request_settings(),
     ));
-    Ok(())
-}
-
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn guardian_checkpoint_migration_request_history() -> Result<()> {
-    skip_if_no_network!(Ok(()));
-    use super::guardian_checkpoint_migration::migration_scenario;
-    let requests = migration_scenario().await?;
-    let mut snapshot = context_snapshot::format_request_history_snapshot(
-        "An old checkpoint retains a user restriction, assistant questions, and a verified answer. Incompatible automatic compaction keeps legacy review across restart with its saved answer; compatible manual compaction immediately activates thread-owned review.",
-        &requests,
-        &ContextSnapshotOptions::default()
-            .rewrite_known_segments()
-            .include_request_settings(),
-    );
-    // Normalize executor IDs, paths and shell wrappers in the reviewed actions.
-    for (pattern, replacement) in [
-        (
-            r#"(?m)^(\s*"environment_id": )"(?:local|remote)""#,
-            "$1\"<ENVIRONMENT>\"",
-        ),
-        (
-            r#"(The active permission profile for environment )"(?:local|remote)""#,
-            "$1\"<ENVIRONMENT>\"",
-        ),
-        (r#"(?m)^(\s*"cwd": )"[^"]*""#, "$1\"<CWD>\""),
-        (
-            r#""command": \[\s*(?:"[^"]*",\s*)*"exit 0"\s*\]"#,
-            "\"command\": [\"<SHELL>\", \"exit 0\"]",
-        ),
-    ] {
-        snapshot = regex_lite::Regex::new(pattern)?
-            .replace_all(&snapshot, replacement)
-            .into_owned();
-    }
-    insta::assert_snapshot!("guardian_checkpoint_migration", snapshot);
     Ok(())
 }
 

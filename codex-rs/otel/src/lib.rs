@@ -1,4 +1,6 @@
 pub mod auth_storage;
+pub mod metrics_data;
+pub use trace_context::Context;
 pub(crate) mod config;
 mod events;
 pub(crate) mod metrics;

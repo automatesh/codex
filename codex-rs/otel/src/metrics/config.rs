@@ -12,7 +12,7 @@ use crate::metrics::names::TURN_COST_MICROUSD_METRIC;
 use crate::metrics::names::TURN_TOKEN_USAGE_METRIC;
 use crate::metrics::validation::validate_tag_key;
 use crate::metrics::validation::validate_tag_value;
-use opentelemetry_sdk::metrics::InMemoryMetricExporter;
+use crate::metrics_data::InMemoryMetricExporter;
 use std::collections::BTreeMap;
 use std::time::Duration;
 

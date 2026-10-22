@@ -16,10 +16,10 @@ use crate::metrics::names::WEBSOCKET_EVENT_COUNT_METRIC;
 use crate::metrics::names::WEBSOCKET_EVENT_DURATION_METRIC;
 use crate::metrics::names::WEBSOCKET_REQUEST_COUNT_METRIC;
 use crate::metrics::names::WEBSOCKET_REQUEST_DURATION_METRIC;
-use opentelemetry_sdk::metrics::data::AggregatedMetrics;
-use opentelemetry_sdk::metrics::data::Metric;
-use opentelemetry_sdk::metrics::data::MetricData;
-use opentelemetry_sdk::metrics::data::ResourceMetrics;
+use crate::metrics_data::AggregatedMetrics;
+use crate::metrics_data::Metric;
+use crate::metrics_data::MetricData;
+use crate::metrics_data::ResourceMetrics;
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct RuntimeMetricTotals {
@@ -172,7 +172,7 @@ impl RuntimeMetricsSummary {
 fn sum_counter(snapshot: &ResourceMetrics, name: &str) -> u64 {
     snapshot
         .scope_metrics()
-        .flat_map(opentelemetry_sdk::metrics::data::ScopeMetrics::metrics)
+        .flat_map(crate::metrics_data::ScopeMetrics::metrics)
         .filter(|metric| metric.name() == name)
         .map(sum_counter_metric)
         .sum()
@@ -182,7 +182,7 @@ fn sum_counter_metric(metric: &Metric) -> u64 {
     match metric.data() {
         AggregatedMetrics::U64(MetricData::Sum(sum)) => sum
             .data_points()
-            .map(opentelemetry_sdk::metrics::data::SumDataPoint::value)
+            .map(crate::metrics_data::SumDataPoint::value)
             .sum(),
         _ => 0,
     }
@@ -195,7 +195,7 @@ fn sum_histogram_ms(snapshot: &ResourceMetrics, name: &str) -> u64 {
 fn sum_histogram_f64(snapshot: &ResourceMetrics, name: &str) -> f64 {
     snapshot
         .scope_metrics()
-        .flat_map(opentelemetry_sdk::metrics::data::ScopeMetrics::metrics)
+        .flat_map(crate::metrics_data::ScopeMetrics::metrics)
         .filter(|metric| metric.name() == name)
         .map(sum_histogram_metric)
         .sum()
@@ -205,7 +205,7 @@ fn sum_histogram_metric(metric: &Metric) -> f64 {
     match metric.data() {
         AggregatedMetrics::F64(MetricData::Histogram(histogram)) => histogram
             .data_points()
-            .map(opentelemetry_sdk::metrics::data::HistogramDataPoint::sum)
+            .map(crate::metrics_data::HistogramDataPoint::sum)
             .sum(),
         _ => 0.0,
     }

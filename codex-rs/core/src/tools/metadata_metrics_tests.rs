@@ -1,9 +1,9 @@
 use super::*;
 use codex_otel::MetricsConfig;
-use opentelemetry_sdk::metrics::InMemoryMetricExporter;
-use opentelemetry_sdk::metrics::data::AggregatedMetrics;
-use opentelemetry_sdk::metrics::data::MetricData;
-use opentelemetry_sdk::metrics::data::ScopeMetrics;
+use codex_otel::metrics_data::AggregatedMetrics;
+use codex_otel::metrics_data::InMemoryMetricExporter;
+use codex_otel::metrics_data::MetricData;
+use codex_otel::metrics_data::ScopeMetrics;
 use pretty_assertions::assert_eq;
 use std::collections::BTreeMap;
 

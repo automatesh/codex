@@ -10,7 +10,9 @@ tools, MCP, skills, subagents, hooks, session persistence, resume, and compactio
 ## Removed
 
 - Product analytics queue, background worker, HTTP delivery, and debug capture.
-- OTLP log, trace, and metric exporters, including the built-in Statsig endpoint.
+- OpenTelemetry API, SDK, semantic conventions, tracing integration and OTLP exporters.
+- Guardian V2 action classifier and synchronous reviewer, their extension hooks,
+  review sessions, retry loops, rejection circuit breaker and decision cache.
 - OTEL exporter initialization, runtime OTEL event emission, and automatic HTTP/MCP trace propagation.
 - Startup metric buffering before a provider is installed.
 - Feedback request/auth metadata collection and its tracing layer.
@@ -24,14 +26,16 @@ enable these transports. Config loading exposes analytics and feedback as disabl
 
 The `codex-analytics` and `codex-otel` public interfaces remain so coding features do
 not need wholesale rewrites. Analytics calls discard their input. OTEL provider
-creation returns `None`. Local in-memory metric types and OpenTelemetry SDK types
-remain for upstream API compatibility, local diagnostics, and tests; this is not
-a claim that every OpenTelemetry type has been removed from the dependency tree.
+creation returns `None`. Local counters, histograms and metric snapshots use plain
+Rust types; they do not depend on OpenTelemetry and have no network exporter or
+background worker.
 
 Local diagnostic logs and session files are retained. Model requests, authentication,
 web research, MCP, and connected tools still require their normal network access.
-This branch does not remove Guardian, approval and sandbox enforcement, or handling
-of server-side policy errors.
+Manual approval and sandbox enforcement remain. Guardian is unavailable; explicit
+AutoReview settings and managed requirements that mandate it are rejected rather
+than silently ignored. Protocol/history fields remain readable for old sessions.
+Handling of server-side policy errors, including `cyber_policy`, is unchanged.
 
 ## Build
 
@@ -53,7 +57,7 @@ cd codex-rs
 cargo check --locked -p codex-cli
 cargo test --locked -p codex-analytics -p codex-feedback -p codex-otel -- --test-threads=1
 cargo test --locked -p codex-http-client -- --test-threads=1
-cargo test --locked -p codex-core --lib stripped_ -- --test-threads=1
+cargo test --locked -p codex-core --test stripped_config -- --test-threads=1
 ```
 
 Transport regression tests cover explicit exporter configuration, analytics opt-in,

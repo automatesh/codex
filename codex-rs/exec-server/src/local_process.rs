@@ -24,8 +24,6 @@ use codex_sandboxing::SandboxType;
 use codex_sandboxing::is_likely_sandbox_denied;
 use codex_utils_pty::ExecCommandSession;
 use codex_utils_pty::ProcessSignal as PtyProcessSignal;
-use opentelemetry::trace::SpanContext;
-use opentelemetry::trace::TraceContextExt;
 use tokio::sync::Mutex;
 use tokio::sync::Notify;
 use tokio::sync::mpsc;
@@ -278,7 +276,6 @@ impl LocalProcess {
         params: ExecParams,
         mut telemetry: ProcessTelemetry,
     ) -> Result<(ExecResponse, watch::Sender<u64>, ExecProcessEventLog), JSONRPCErrorError> {
-        telemetry.launch_context = telemetry.launch_context.filter(SpanContext::is_valid);
         let metadata = params.metadata.as_ref();
         telemetry.thread_id = metadata
             .and_then(|metadata| metadata.thread_id.as_ref())
@@ -1050,14 +1047,7 @@ fn watch_exit(
     output_notify: Arc<Notify>,
     telemetry: ProcessTelemetry,
 ) -> impl std::future::Future<Output = ()> + Send {
-    // Set the copied OTEL parent before entering; never retain the RPC tracing span.
     let process_span = tracing::info_span!(parent: None, "codex.exec_server.process");
-    if let Some(launch_context) = &telemetry.launch_context {
-        codex_otel::set_parent_from_context(
-            &process_span,
-            opentelemetry::Context::new().with_remote_span_context(launch_context.clone()),
-        );
-    }
     async move {
         let exit_code = exit_rx.await.unwrap_or(-1);
         let sandboxed = {
@@ -1247,12 +1237,12 @@ mod tests {
     use codex_network_proxy::RemoteNetworkProxyConfig;
     use codex_network_proxy::RemoteNetworkProxyLaunchConfig;
     use codex_otel::MetricsConfig;
+    use codex_otel::metrics_data::AggregatedMetrics;
+    use codex_otel::metrics_data::InMemoryMetricExporter;
+    use codex_otel::metrics_data::MetricData;
     use codex_protocol::config_types::ShellEnvironmentPolicyInherit;
     use codex_utils_path_uri::PathUri;
     use codex_utils_pty::ProcessDriver;
-    use opentelemetry_sdk::metrics::InMemoryMetricExporter;
-    use opentelemetry_sdk::metrics::data::AggregatedMetrics;
-    use opentelemetry_sdk::metrics::data::MetricData;
     use pretty_assertions::assert_eq;
     #[cfg(not(target_os = "windows"))]
     use tokio::io::AsyncReadExt;
@@ -1441,7 +1431,7 @@ mod tests {
             .expect("metrics export");
         let finished_processes = resource_metrics
             .scope_metrics()
-            .flat_map(opentelemetry_sdk::metrics::data::ScopeMetrics::metrics)
+            .flat_map(codex_otel::metrics_data::ScopeMetrics::metrics)
             .find(|metric| metric.name() == "exec_server_processes_finished_total")
             .expect("finished process metric");
         let AggregatedMetrics::U64(MetricData::Sum(sum)) = finished_processes.data() else {
@@ -1449,9 +1439,9 @@ mod tests {
         };
         let results = sum
             .data_points()
-            .flat_map(opentelemetry_sdk::metrics::data::SumDataPoint::attributes)
+            .flat_map(codex_otel::metrics_data::SumDataPoint::attributes)
             .filter(|attribute| attribute.key.as_str() == "result")
-            .map(|attribute| attribute.value.as_str().into_owned())
+            .map(|attribute| attribute.value.as_str().to_string())
             .collect::<Vec<_>>();
         assert_eq!(results, vec![expected.to_string()]);
     }

@@ -24,6 +24,7 @@ use codex_otel::MetricsConfig;
 use codex_otel::SessionTelemetry;
 use codex_otel::TelemetryAuthMode;
 use codex_otel::current_span_w3c_trace_context;
+use codex_otel::metrics_data::InMemoryMetricExporter;
 use codex_protocol::ResponseItemId;
 use codex_protocol::SessionId;
 use codex_protocol::ThreadId;
@@ -68,7 +69,6 @@ use core_test_support::test_codex::test_codex;
 use core_test_support::tracing::install_test_tracing;
 use core_test_support::wait_for_event;
 use futures::StreamExt;
-use opentelemetry_sdk::metrics::InMemoryMetricExporter;
 use pretty_assertions::assert_eq;
 use serde_json::json;
 use std::sync::Arc;
@@ -2960,13 +2960,13 @@ fn assert_continuation_metrics_with_item_types(
     telemetry: &SessionTelemetry,
     expected: &[([&str; 5], u64)],
 ) {
-    use opentelemetry_sdk::metrics::data::AggregatedMetrics;
-    use opentelemetry_sdk::metrics::data::MetricData;
+    use codex_otel::metrics_data::AggregatedMetrics;
+    use codex_otel::metrics_data::MetricData;
 
     let snapshot = telemetry.snapshot_metrics().expect("metrics snapshot");
     let metric = snapshot
         .scope_metrics()
-        .flat_map(opentelemetry_sdk::metrics::data::ScopeMetrics::metrics)
+        .flat_map(codex_otel::metrics_data::ScopeMetrics::metrics)
         .find(|metric| metric.name() == codex_otel::WEBSOCKET_CONTINUATION_COUNT_METRIC)
         .expect("continuation counter");
     let AggregatedMetrics::U64(MetricData::Sum(sum)) = metric.data() else {

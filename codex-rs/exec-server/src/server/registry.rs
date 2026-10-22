@@ -1,7 +1,6 @@
 use codex_file_system::FileSystemSandboxContext;
 use codex_file_system::WireFileSystemSandboxContext;
 use codex_utils_path_uri::PathUri;
-use opentelemetry::trace::TraceContextExt;
 use std::sync::Arc;
 
 use crate::local_file_system::resolve_existing_path;
@@ -80,14 +79,10 @@ pub(crate) fn build_router() -> RpcRouter<ExecServerHandler> {
             handler.http_request(request_id, params).await
         },
     );
-    router.request_with_trace(
+    router.request(
         EXEC_METHOD,
-        |handler: Arc<ExecServerHandler>, params: WireExecParams, trace| async move {
-            let launch_context = trace
-                .as_ref()
-                .and_then(codex_otel::context_from_w3c_trace_context)
-                .map(|context| context.span().span_context().clone());
-            handler.exec(params.into(), launch_context).await
+        |handler: Arc<ExecServerHandler>, params: WireExecParams| async move {
+            handler.exec(params.into()).await
         },
     );
     router.request(

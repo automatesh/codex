@@ -80,6 +80,8 @@ impl ManagedFeatures {
             None => (BTreeMap::new(), None),
         };
 
+        validate_guardian_unavailable(&configured_features, &pinned_features, source.as_ref())
+            .map_err(|err| std::io::Error::new(std::io::ErrorKind::InvalidInput, err))?;
         let normalized_features = normalize_candidate(configured_features, &pinned_features);
         validate_pinned_features(&normalized_features, &pinned_features, source.as_ref())?;
         Ok(Self {
@@ -93,6 +95,11 @@ impl ManagedFeatures {
     }
 
     fn normalize_and_validate(&self, candidate: Features) -> ConstraintResult<Features> {
+        validate_guardian_unavailable(
+            &candidate,
+            &self.pinned_features,
+            self.value.source.as_ref(),
+        )?;
         let normalized = normalize_candidate(candidate, &self.pinned_features);
         self.value.can_set(&normalized)?;
         validate_pinned_features_constraint(
@@ -172,6 +179,31 @@ impl std::ops::Deref for ManagedFeatures {
     }
 }
 
+fn validate_guardian_unavailable(
+    candidate: &Features,
+    pinned_features: &BTreeMap<Feature, bool>,
+    source: Option<&RequirementSource>,
+) -> ConstraintResult<()> {
+    let unavailable = candidate
+        .enabled_features()
+        .into_iter()
+        .find(|feature| feature.key().starts_with("guardian"))
+        .or_else(|| {
+            pinned_features.iter().find_map(|(feature, enabled)| {
+                (*enabled && feature.key().starts_with("guardian")).then_some(*feature)
+            })
+        });
+    if let Some(feature) = unavailable {
+        return Err(ConstraintError::InvalidValue {
+            field_name: "features",
+            candidate: format!("{}=true", feature.key()),
+            allowed: "false; Guardian is not included in this build".to_string(),
+            requirement_source: source.cloned().unwrap_or(RequirementSource::Unknown),
+        });
+    }
+    Ok(())
+}
+
 fn normalize_candidate(
     mut candidate: Features,
     pinned_features: &BTreeMap<Feature, bool>,
@@ -248,15 +280,6 @@ fn parse_feature_requirements(
                 &mut startup_warnings,
                 format!(
                     "Ignoring removed `features` requirement `{key}` from {source}; the patched zsh backend has been removed."
-                ),
-            );
-            continue;
-        }
-        if key == Feature::GuardianThreadContext.key() {
-            push_feature_requirement_warning(
-                &mut startup_warnings,
-                format!(
-                    "Ignoring removed `features` requirement `{key}` from {source}; thread-owned Guardian context is always enabled."
                 ),
             );
             continue;

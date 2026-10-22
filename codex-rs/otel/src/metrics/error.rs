@@ -29,7 +29,7 @@ pub enum MetricsError {
     #[error("failed to flush or shutdown metrics provider")]
     ProviderShutdown {
         #[source]
-        source: opentelemetry_sdk::error::OTelSdkError,
+        source: std::io::Error,
     },
 
     #[error("runtime metrics snapshot reader is not enabled")]
@@ -38,6 +38,6 @@ pub enum MetricsError {
     #[error("failed to collect runtime metrics snapshot from metrics reader")]
     RuntimeSnapshotCollect {
         #[source]
-        source: opentelemetry_sdk::error::OTelSdkError,
+        source: std::io::Error,
     },
 }

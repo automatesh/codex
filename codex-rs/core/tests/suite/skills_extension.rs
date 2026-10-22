@@ -40,6 +40,8 @@ use codex_otel::OtelHttpProtocol;
 use codex_otel::OtelProvider;
 use codex_otel::OtelSettings;
 use codex_otel::THREAD_SKILLS_KEPT_TOTAL_METRIC;
+use codex_otel::metrics_data::AggregatedMetrics;
+use codex_otel::metrics_data::MetricData;
 use codex_protocol::capabilities::CapabilityRootLocation;
 use codex_protocol::capabilities::SelectedCapabilityRoot;
 use codex_protocol::mcp_policy::EnvironmentMcpPolicy;
@@ -111,8 +113,6 @@ use core_test_support::test_codex::test_env;
 use core_test_support::test_codex::turn_permission_fields;
 use core_test_support::wait_for_event;
 use core_test_support::wait_for_mcp_server;
-use opentelemetry_sdk::metrics::data::AggregatedMetrics;
-use opentelemetry_sdk::metrics::data::MetricData;
 use pretty_assertions::assert_eq;
 use serde_json::Value;
 use serde_json::json;
@@ -2384,7 +2384,7 @@ async fn assert_catalog_model_switch(max_context_tokens: Option<usize>) -> Resul
     let snapshot = telemetry.metrics().expect("metrics client").snapshot()?;
     let metric = snapshot
         .scope_metrics()
-        .flat_map(opentelemetry_sdk::metrics::data::ScopeMetrics::metrics)
+        .flat_map(codex_otel::metrics_data::ScopeMetrics::metrics)
         .find(|metric| metric.name() == THREAD_SKILLS_KEPT_TOTAL_METRIC)
         .expect("catalog metrics");
     let AggregatedMetrics::F64(MetricData::Histogram(histogram)) = metric.data() else {

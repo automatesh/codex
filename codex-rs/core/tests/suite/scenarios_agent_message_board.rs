@@ -1067,7 +1067,17 @@ async fn codex_instances_share_board_with_fixed_access() -> anyhow::Result<()> {
         options
             .thread_extension_init
             .insert(IsolatedSessionExtensions(extensions.clone()));
-        let mut policy = codex_guardian_reviewer::reviewer_tool_policy();
+        let mut policy = codex_extension_api::ToolPolicy {
+            require_managed_sandbox: true,
+            require_unified_exec: true,
+            expose_additional_permissions: false,
+            allowed_tools: Some(
+                ["exec_command", "write_stdin", "view_image", "exec", "wait"]
+                    .into_iter()
+                    .map(codex_extension_api::ToolName::plain)
+                    .collect(),
+            ),
+        };
         policy.allowed_tools.as_mut().unwrap().extend(
             [
                 "post",

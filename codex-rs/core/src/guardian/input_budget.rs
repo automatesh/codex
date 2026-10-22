@@ -362,7 +362,3 @@ pub(crate) async fn finalize(
         .remove::<super::request_budget::ExhaustedReviewBudget>();
     Ok(())
 }
-
-#[cfg(test)]
-#[path = "input_budget_tests.rs"]
-mod tests;

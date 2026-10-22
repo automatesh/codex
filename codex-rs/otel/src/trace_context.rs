@@ -1,8 +1,18 @@
 use codex_protocol::protocol::W3cTraceContext;
-use opentelemetry::Context;
-use opentelemetry::trace::TraceState;
 use std::collections::BTreeMap;
 use tracing::Span;
+
+/// An inert compatibility token; trace context is never collected or propagated.
+#[derive(Clone, Debug, Default)]
+pub struct Context;
+impl Context {
+    pub fn new() -> Self {
+        Self
+    }
+    pub fn current() -> Self {
+        Self
+    }
+}
 
 pub fn current_span_w3c_trace_context() -> Option<W3cTraceContext> {
     None
@@ -31,40 +41,41 @@ pub fn traceparent_context_from_env() -> Option<Context> {
 pub fn validate_tracestate_entries(
     entries: &BTreeMap<String, BTreeMap<String, String>>,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    // Reject malformed entries before installing them so propagated trace
-    // context remains acceptable to other W3C Trace Context extractors. The
-    // SDK validates member keys and list structure, but configured member
-    // fields are joined into header values here and need stricter validation.
-    let entries = entries
-        .iter()
-        .map(|(key, fields)| encode_tracestate_member_fields(key, fields))
-        .collect::<Result<Vec<_>, _>>()?;
-    TraceState::from_key_value(
-        entries
-            .iter()
-            .map(|(key, value)| (key.as_str(), value.as_str())),
-    )
-    .map_err(|err| {
-        std::io::Error::new(
-            std::io::ErrorKind::InvalidInput,
-            format!("invalid configured tracestate: {err}"),
-        )
-    })?;
+    for (key, fields) in entries {
+        validate_tracestate_member(key, fields)?;
+    }
     Ok(())
 }
 
-/// Validates one configured tracestate member and its encoded field value.
 pub fn validate_tracestate_member(
     member_key: &str,
     fields: &BTreeMap<String, String>,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    let (key, value) = encode_tracestate_member_fields(member_key, fields)?;
-    TraceState::from_key_value([(key.as_str(), value.as_str())]).map_err(|err| {
-        std::io::Error::new(
-            std::io::ErrorKind::InvalidInput,
-            format!("invalid configured tracestate: {err}"),
-        )
-    })?;
+    let (_, value) = encode_tracestate_member_fields(member_key, fields)?;
+    let valid_char = |byte: u8| {
+        byte.is_ascii_lowercase()
+            || byte.is_ascii_digit()
+            || matches!(byte, b'_' | b'-' | b'*' | b'/')
+    };
+    let valid_start = |part: &str| {
+        part.as_bytes()
+            .first()
+            .is_some_and(|byte| byte.is_ascii_lowercase() || byte.is_ascii_digit())
+    };
+    let valid_key = if let Some((tenant, vendor)) = member_key.split_once('@') {
+        valid_start(tenant)
+            && valid_start(vendor)
+            && vendor.len() <= 13
+            && tenant.bytes().all(valid_char)
+            && vendor.bytes().all(valid_char)
+    } else {
+        valid_start(member_key) && member_key.bytes().all(valid_char)
+    };
+    if !valid_key || member_key.len() > 256 || value.len() > 256 {
+        return Err(invalid_tracestate_config(
+            "invalid configured tracestate member".into(),
+        ));
+    }
     Ok(())
 }
 

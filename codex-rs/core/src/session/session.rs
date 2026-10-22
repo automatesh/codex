@@ -1016,7 +1016,7 @@ impl Session {
             .unwrap_or_else(|| {
                 // Older reviewer rollouts predate the explicit startup policy.
                 if crate::guardian::is_basic_session_source(&session_configuration.session_source) {
-                    Arc::new(codex_guardian_reviewer::reviewer_tool_policy())
+                    Arc::new(crate::guardian::reviewer_tool_policy())
                 } else {
                     Arc::default()
                 }
@@ -1800,11 +1800,7 @@ impl Session {
                     InitialHistory::Resumed(_) | InitialHistory::Forked(_)
                 ))
                 .with_session_context(
-                    crate::guardian::prompt_cache_key_override_for_review_session(
-                        &session_configuration.session_source,
-                        session_configuration.parent_thread_id,
-                    )
-                    .or(fork_cache_key),
+                    fork_cache_key,
                     tx_event.clone(),
                     codex_responses_headers,
                     crate::cyber_access_program::ApiKeyCyberAccessPrograms::from_config(&config),

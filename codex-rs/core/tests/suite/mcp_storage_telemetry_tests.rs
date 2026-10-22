@@ -9,6 +9,8 @@ use codex_history::InitialHistory;
 use codex_history::RolloutItem;
 use codex_otel::MetricsClient;
 use codex_otel::MetricsConfig;
+use codex_otel::metrics_data::AggregatedMetrics;
+use codex_otel::metrics_data::MetricData;
 use codex_protocol::protocol::EventMsg;
 use codex_protocol::protocol::SessionMeta;
 use codex_protocol::protocol::SessionMetaLine;
@@ -18,8 +20,6 @@ use core_test_support::responses;
 use core_test_support::skip_if_no_network;
 use core_test_support::test_codex::test_codex;
 use core_test_support::wait_for_event;
-use opentelemetry_sdk::metrics::data::AggregatedMetrics;
-use opentelemetry_sdk::metrics::data::MetricData;
 use pretty_assertions::assert_eq;
 use serde_json::json;
 use std::collections::BTreeMap;
@@ -34,7 +34,7 @@ fn storage_loads(metrics: &MetricsClient) -> Result<BTreeMap<String, u64>> {
     for metric in metrics
         .snapshot()?
         .scope_metrics()
-        .flat_map(opentelemetry_sdk::metrics::data::ScopeMetrics::metrics)
+        .flat_map(codex_otel::metrics_data::ScopeMetrics::metrics)
     {
         if metric.name() == "codex.auth_storage.operation"
             && let AggregatedMetrics::U64(MetricData::Sum(sum)) = metric.data()

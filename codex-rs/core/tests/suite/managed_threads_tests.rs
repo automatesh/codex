@@ -350,7 +350,7 @@ async fn startup_allowlist_controls_advertising_and_execution(
     Ok(())
 }
 
-#[test_case(None, Some(codex_guardian_reviewer::reviewer_tool_policy()), false; "explicit_policy")]
+#[test_case(None, Some(codex_extension_api::ToolPolicy { require_managed_sandbox: true, require_unified_exec: true, expose_additional_permissions: false, allowed_tools: Some(["exec_command", "write_stdin", "view_image", "exec", "wait"].into_iter().map(codex_extension_api::ToolName::plain).collect()) }), false; "explicit_policy")]
 #[test_case(None, None, true; "ordinary_defaults")]
 #[test_case(Some(codex_protocol::protocol::SessionSource::Internal(
     codex_protocol::protocol::InternalSessionSource::Guardian)), None, false; "internal_guardian_fallback")]

@@ -232,7 +232,7 @@ metrics_exporter = {{ otlp-http = {{ endpoint = "{}/metrics", protocol = "json" 
                 .snapshot()
                 .expect("snapshot")
                 .scope_metrics()
-                .flat_map(opentelemetry_sdk::metrics::data::ScopeMetrics::metrics)
+                .flat_map(codex_otel::metrics_data::ScopeMetrics::metrics)
                 .any(|metric| metric.name() == "codex.turn.cost_microusd")
             {
                 break;

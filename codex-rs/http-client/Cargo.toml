@@ -39,9 +39,6 @@ windows-sys = { workspace = true, features = [
 workspace = true
 
 [dev-dependencies]
-opentelemetry = { workspace = true }
-opentelemetry_sdk = { workspace = true }
-tracing-opentelemetry = { workspace = true }
 codex-utils-cargo-bin = { workspace = true }
 pretty_assertions = { workspace = true }
 rcgen = { workspace = true }

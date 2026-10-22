@@ -41,11 +41,11 @@ async fn turn_input_and_history_advance_while_ranking_is_blocked()
     use codex_extension_api::SkillInvocationKind;
     use codex_extension_api::ThreadStartInput;
     use codex_otel::MetricsConfig;
+    use codex_otel::metrics_data::AggregatedMetrics;
+    use codex_otel::metrics_data::InMemoryMetricExporter;
+    use codex_otel::metrics_data::MetricData;
+    use codex_otel::metrics_data::ScopeMetrics;
     use codex_protocol::protocol::SessionSource;
-    use opentelemetry_sdk::metrics::InMemoryMetricExporter;
-    use opentelemetry_sdk::metrics::data::AggregatedMetrics;
-    use opentelemetry_sdk::metrics::data::MetricData;
-    use opentelemetry_sdk::metrics::data::ScopeMetrics;
 
     use crate::SkillProviders;
     use crate::SkillsExtensionConfig;

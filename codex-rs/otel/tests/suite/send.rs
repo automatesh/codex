@@ -45,8 +45,8 @@ fn send_builds_payload_with_tags_and_histograms() -> Result<()> {
     let counter = find_metric(&resource_metrics, "codex.turns").expect("counter metric missing");
     assert_eq!(counter.description(), "Total number of Codex turns.");
     let counter_attributes = match counter.data() {
-        opentelemetry_sdk::metrics::data::AggregatedMetrics::U64(data) => match data {
-            opentelemetry_sdk::metrics::data::MetricData::Sum(sum) => {
+        codex_otel::metrics_data::AggregatedMetrics::U64(data) => match data {
+            codex_otel::metrics_data::MetricData::Sum(sum) => {
                 let points: Vec<_> = sum.data_points().collect();
                 assert_eq!(points.len(), 1);
                 assert_eq!(points[0].value(), 1);
@@ -74,12 +74,12 @@ fn send_builds_payload_with_tags_and_histograms() -> Result<()> {
     let histogram_attrs = attributes_to_map(
         find_metric(&resource_metrics, "codex.tool_latency")
             .and_then(|metric| match metric.data() {
-                opentelemetry_sdk::metrics::data::AggregatedMetrics::F64(
-                    opentelemetry_sdk::metrics::data::MetricData::Histogram(histogram),
+                codex_otel::metrics_data::AggregatedMetrics::F64(
+                    codex_otel::metrics_data::MetricData::Histogram(histogram),
                 ) => histogram
                     .data_points()
                     .next()
-                    .map(opentelemetry_sdk::metrics::data::HistogramDataPoint::attributes),
+                    .map(codex_otel::metrics_data::HistogramDataPoint::attributes),
                 _ => None,
             })
             .expect("codex.tool_latency histogram attributes should exist"),
@@ -94,8 +94,8 @@ fn send_builds_payload_with_tags_and_histograms() -> Result<()> {
     let gauge = find_metric(&resource_metrics, "codex.active").expect("gauge metric missing");
     assert_eq!(gauge.description(), "Number of active Codex operations.");
     let gauge_point = match gauge.data() {
-        opentelemetry_sdk::metrics::data::AggregatedMetrics::I64(data) => match data {
-            opentelemetry_sdk::metrics::data::MetricData::Gauge(gauge) => {
+        codex_otel::metrics_data::AggregatedMetrics::I64(data) => match data {
+            codex_otel::metrics_data::MetricData::Gauge(gauge) => {
                 gauge.data_points().next().expect("gauge point")
             }
             _ => panic!("unexpected gauge aggregation"),
@@ -216,8 +216,8 @@ fn send_merges_default_tags_per_line() -> Result<()> {
     let alpha_metric =
         find_metric(&resource_metrics, "codex.alpha").expect("codex.alpha metric missing");
     let alpha_point = match alpha_metric.data() {
-        opentelemetry_sdk::metrics::data::AggregatedMetrics::U64(data) => match data {
-            opentelemetry_sdk::metrics::data::MetricData::Sum(sum) => {
+        codex_otel::metrics_data::AggregatedMetrics::U64(data) => match data {
+            codex_otel::metrics_data::MetricData::Sum(sum) => {
                 let points: Vec<_> = sum.data_points().collect();
                 assert_eq!(points.len(), 1);
                 points[0]
@@ -239,8 +239,8 @@ fn send_merges_default_tags_per_line() -> Result<()> {
     let beta_metric =
         find_metric(&resource_metrics, "codex.beta").expect("codex.beta metric missing");
     let beta_point = match beta_metric.data() {
-        opentelemetry_sdk::metrics::data::AggregatedMetrics::U64(data) => match data {
-            opentelemetry_sdk::metrics::data::MetricData::Sum(sum) => {
+        codex_otel::metrics_data::AggregatedMetrics::U64(data) => match data {
+            codex_otel::metrics_data::MetricData::Sum(sum) => {
                 let points: Vec<_> = sum.data_points().collect();
                 assert_eq!(points.len(), 1);
                 points[0]
@@ -273,10 +273,8 @@ fn client_sends_enqueued_metric() -> Result<()> {
     let resource_metrics = latest_metrics(&exporter);
     let counter = find_metric(&resource_metrics, "codex.turns").expect("counter metric missing");
     let points = match counter.data() {
-        opentelemetry_sdk::metrics::data::AggregatedMetrics::U64(data) => match data {
-            opentelemetry_sdk::metrics::data::MetricData::Sum(sum) => {
-                sum.data_points().collect::<Vec<_>>()
-            }
+        codex_otel::metrics_data::AggregatedMetrics::U64(data) => match data {
+            codex_otel::metrics_data::MetricData::Sum(sum) => sum.data_points().collect::<Vec<_>>(),
             _ => panic!("unexpected counter aggregation"),
         },
         _ => panic!("unexpected counter data type"),
@@ -301,10 +299,8 @@ fn shutdown_flushes_in_memory_exporter() -> Result<()> {
     let resource_metrics = latest_metrics(&exporter);
     let counter = find_metric(&resource_metrics, "codex.turns").expect("counter metric missing");
     let points = match counter.data() {
-        opentelemetry_sdk::metrics::data::AggregatedMetrics::U64(data) => match data {
-            opentelemetry_sdk::metrics::data::MetricData::Sum(sum) => {
-                sum.data_points().collect::<Vec<_>>()
-            }
+        codex_otel::metrics_data::AggregatedMetrics::U64(data) => match data {
+            codex_otel::metrics_data::MetricData::Sum(sum) => sum.data_points().collect::<Vec<_>>(),
             _ => panic!("unexpected counter aggregation"),
         },
         _ => panic!("unexpected counter data type"),

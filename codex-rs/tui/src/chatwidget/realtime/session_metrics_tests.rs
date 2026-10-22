@@ -4,9 +4,9 @@ use super::super::StartupRetry;
 use super::*;
 use codex_otel::MetricsClient;
 use codex_otel::MetricsConfig;
-use opentelemetry_sdk::metrics::InMemoryMetricExporter;
-use opentelemetry_sdk::metrics::data::AggregatedMetrics;
-use opentelemetry_sdk::metrics::data::MetricData;
+use codex_otel::metrics_data::AggregatedMetrics;
+use codex_otel::metrics_data::InMemoryMetricExporter;
+use codex_otel::metrics_data::MetricData;
 use pretty_assertions::assert_eq;
 use std::collections::BTreeMap;
 use std::time::Instant;
@@ -75,7 +75,7 @@ async fn completed_voice_duration_uses_terminal_success_or_failure_outcome() {
             .expect("runtime metrics snapshot should be available");
         let duration = metrics
             .scope_metrics()
-            .flat_map(opentelemetry_sdk::metrics::data::ScopeMetrics::metrics)
+            .flat_map(codex_otel::metrics_data::ScopeMetrics::metrics)
             .find(|metric| metric.name() == "codex.voice.session.duration")
             .expect("voice duration metric should be recorded");
         let duration_attributes = match duration.data() {
@@ -100,7 +100,7 @@ async fn completed_voice_duration_uses_terminal_success_or_failure_outcome() {
 
         let failure = metrics
             .scope_metrics()
-            .flat_map(opentelemetry_sdk::metrics::data::ScopeMetrics::metrics)
+            .flat_map(codex_otel::metrics_data::ScopeMetrics::metrics)
             .find(|metric| metric.name() == "codex.voice.session.failure");
         if failed {
             let failure_attributes = match failure

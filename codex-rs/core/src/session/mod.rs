@@ -306,7 +306,6 @@ use self::turn_context::TurnContext;
 mod rollout_reconstruction_tests;
 
 use crate::exec_policy::ExecPolicyUpdateError;
-use crate::guardian::GuardianReviewSessionManager;
 use crate::mcp::McpEnvironmentScope;
 use crate::mcp::McpManager;
 use crate::mcp::McpThreadIdentity;
@@ -748,39 +747,18 @@ impl Session {
                 "No models are available. Set `model` explicitly or check your model catalog configuration.".to_string(),
             ));
         }
-        let trusted_guardian_reviewer = crate::guardian::is_basic_session_source(&session_source)
-            && !matches!(conversation_history, InitialHistory::Resumed(_));
-        if config
-            .config_layer_stack
-            .requirements()
-            .auto_review_required_for_model(&model)
-            && !trusted_guardian_reviewer
-        {
-            let config = Arc::make_mut(&mut config);
-            if matches!(
-                config.legacy_sandbox_policy(),
-                SandboxPolicy::DangerFullAccess
-            ) {
-                let permission_profile = PermissionProfile::workspace_write();
-                config
-                    .permissions
-                    .set_permission_profile(permission_profile.clone())
-                    .map_err(|err| CodexErr::InvalidRequest(err.to_string()))?;
-                if let Some(network) = config.permissions.network.as_ref() {
-                    config.permissions.network = Some(
-                        network
-                            .recompute_for_permission_profile(&permission_profile)
-                            .map_err(|err| CodexErr::InvalidRequest(err.to_string()))?,
-                    );
-                }
-            }
-            config
+        let trusted_guardian_reviewer = false;
+        if crate::guardian::is_basic_session_source(&session_source)
+            || config.approvals_reviewer == ApprovalsReviewer::AutoReview
+            || config
                 .config_layer_stack
                 .requirements()
-                .approvals_reviewer
-                .can_set(&ApprovalsReviewer::AutoReview)
-                .map_err(|err| CodexErr::InvalidRequest(err.to_string()))?;
-            config.approvals_reviewer = ApprovalsReviewer::AutoReview;
+                .auto_review_required_for_model(&model)
+        {
+            return Err(CodexErr::InvalidRequest(
+                "Guardian is not included in this build; required automatic review is unavailable"
+                    .to_string(),
+            ));
         }
         if allow_provider_model_fallback
             && let Some(requested_model) = config.model.as_ref()
@@ -1860,9 +1838,6 @@ impl Session {
             .zip(metadata)
             .map(|(item, metadata)| ResponseItemEnvelope { item, metadata })
             .collect();
-        let context = crate::guardian::GuardianReviewContext::from(turn_context);
-        let (_, reviewer) = crate::guardian::resolve_review_model(self, &context).await;
-        let reviewer_compaction_hash = reviewer.comp_hash.clone();
         {
             let mut state = self.state.lock().await;
             state.replace_annotated_history(
@@ -1873,7 +1848,7 @@ impl Session {
             state.history.restore_review_context(
                 Some(&retained_context),
                 guardian_history.as_ref(),
-                reviewer_compaction_hash.as_deref(),
+                None,
             );
             state.last_started_turn_id = last_started_turn_id;
             state.turn_attribution = turn_attribution;
@@ -2401,13 +2376,6 @@ impl Session {
                 turn_context.sub_id.clone(),
                 error,
             ));
-    }
-
-    /// Returns the reviewer pool installed by the Guardian extension.
-    pub(crate) fn guardian_review_session(&self) -> Option<Arc<GuardianReviewSessionManager>> {
-        self.services
-            .thread_extension_data
-            .get::<GuardianReviewSessionManager>()
     }
 
     pub(crate) async fn is_private_guardian_reviewer(&self) -> bool {

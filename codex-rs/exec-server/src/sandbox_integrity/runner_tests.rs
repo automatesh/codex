@@ -4,6 +4,9 @@ use super::super::backend_tests::deny_glob;
 use super::super::backend_tests::sandbox_request;
 use super::*;
 use codex_otel::MetricsConfig;
+use codex_otel::metrics_data::AggregatedMetrics;
+use codex_otel::metrics_data::InMemoryMetricExporter;
+use codex_otel::metrics_data::MetricData;
 use codex_protocol::models::PermissionProfile;
 use codex_protocol::permissions::FileSystemAccessMode;
 use codex_protocol::permissions::FileSystemPath;
@@ -13,9 +16,6 @@ use codex_protocol::permissions::FileSystemSpecialPath;
 use codex_protocol::permissions::NetworkSandboxPolicy;
 use codex_sandboxing::SandboxType;
 use codex_utils_absolute_path::AbsolutePathBuf;
-use opentelemetry_sdk::metrics::InMemoryMetricExporter;
-use opentelemetry_sdk::metrics::data::AggregatedMetrics;
-use opentelemetry_sdk::metrics::data::MetricData;
 use pretty_assertions::assert_eq;
 use std::collections::BTreeMap;
 use std::fs;
@@ -130,7 +130,7 @@ fn records_every_outcome_and_times_preparation_without_paths() -> anyhow::Result
     let mut durations = Vec::new();
     for metric in snapshot
         .scope_metrics()
-        .flat_map(opentelemetry_sdk::metrics::data::ScopeMetrics::metrics)
+        .flat_map(codex_otel::metrics_data::ScopeMetrics::metrics)
     {
         match metric.data() {
             AggregatedMetrics::U64(MetricData::Sum(sum)) => {
@@ -138,7 +138,7 @@ fn records_every_outcome_and_times_preparation_without_paths() -> anyhow::Result
                 for point in sum.data_points() {
                     let attributes: BTreeMap<_, _> = point
                         .attributes()
-                        .map(|tag| (tag.key.as_str(), tag.value.as_str().into_owned()))
+                        .map(|tag| (tag.key.as_str(), tag.value.as_str().to_string()))
                         .collect();
                     assert_eq!(attributes["checker"], "contents");
                     if attributes["backend"] == "test"
@@ -161,7 +161,7 @@ fn records_every_outcome_and_times_preparation_without_paths() -> anyhow::Result
                 assert_eq!(
                     histogram
                         .data_points()
-                        .map(opentelemetry_sdk::metrics::data::HistogramDataPoint::count)
+                        .map(codex_otel::metrics_data::HistogramDataPoint::count)
                         .sum::<u64>(),
                     expected_preparations
                 );

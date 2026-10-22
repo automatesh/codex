@@ -26,7 +26,6 @@ codex-utils-home-dir = { workspace = true }
 codex-utils-path-uri = { workspace = true }
 codex-utils-rustls-provider = { workspace = true }
 globset = { workspace = true }
-opentelemetry = { workspace = true }
 rand = { workspace = true }
 rand_regex = { workspace = true }
 regex = { workspace = true }
