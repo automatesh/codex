@@ -195,15 +195,16 @@ pub fn upgrade(distribution: &Path) -> Result<()> {
             protect(&directory)?;
         }
         for (name, input) in &mut inputs {
+            let name = *name;
             copy_locked(
                 input,
                 &staging.join("new").join(name),
-                &next.binaries[*name],
+                &next.binaries[name],
             )?;
             copy_locked(
                 &mut locked_file(&root.join(name))?,
                 &staging.join("old").join(name),
-                &previous.binaries[*name],
+                &previous.binaries[name],
             )?;
         }
         write_new(&staging.join("new").join(MANIFEST), &next_manifest_bytes)?;
