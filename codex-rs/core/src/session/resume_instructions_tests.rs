@@ -387,7 +387,7 @@ async fn assert_original_paginated_archive_bootstrap(fork: bool, ephemeral: bool
         let lines = std::fs::read_to_string(&path)
             .unwrap()
             .lines()
-            .map(|line| serde_json::from_str::<codex_rollout::RolloutLine>(line).unwrap())
+            .map(|line| codex_rollout::parse_rollout_line_bytes(line.as_bytes()).unwrap())
             .collect::<Vec<_>>();
         let history_base = codex_protocol::protocol::HistoryPosition {
             thread_id: session.thread_id,
