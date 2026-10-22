@@ -23,6 +23,7 @@ use crate::context::UserInstructions;
 use crate::context::world_state::EnvironmentsState;
 use crate::context::world_state::WorldState;
 use crate::context::world_state::WorldStateUpdateContent;
+use crate::session::ForkPersistence;
 use crate::session::session::Session;
 use crate::session::step_context::StepContext;
 use codex_history::InitialHistory;
@@ -143,17 +144,48 @@ impl Session {
         let (full_history, history_mode) = match validation {
             Ok(_) => (None, turn.history_mode),
             Err(original_error) => {
-                let Some(live_thread) = self.live_thread() else {
-                    return Err(CodexErr::InvalidRequest(original_error));
+                let archive = match (history, &self.fork_persistence) {
+                    (
+                        InitialHistory::Forked(items),
+                        ForkPersistence::Referenced {
+                            history_base: Some(history_base),
+                            ..
+                        },
+                    ) => {
+                        let source_id = items
+                            .iter()
+                            .find_map(|item| match item {
+                                RolloutItem::SessionMeta(meta) => Some(meta.meta.id),
+                                _ => None,
+                            })
+                            .ok_or_else(|| {
+                                CodexErr::InvalidRequest(format!(
+                                    "{original_error} The frozen fork source metadata is missing."
+                                ))
+                            })?;
+                        self.services
+                            .thread_store
+                            .load_instruction_history_for_fork(
+                                codex_thread_store::LoadThreadHistoryParams {
+                                    thread_id: source_id,
+                                    include_archived: true,
+                                },
+                                *history_base,
+                            )
+                            .await
+                    }
+                    _ => {
+                        let Some(live_thread) = self.live_thread() else {
+                            return Err(CodexErr::InvalidRequest(original_error));
+                        };
+                        live_thread.load_instruction_history().await
+                    }
                 };
-                let archive = live_thread
-                    .load_instruction_history()
-                    .await
-                    .map_err(|error| {
-                        CodexErr::InvalidRequest(format!(
-                            "{original_error} Full archive could not be loaded: {error}"
-                        ))
-                    })?;
+                let archive = archive.map_err(|error| {
+                    CodexErr::InvalidRequest(format!(
+                        "{original_error} Full archive could not be loaded: {error}"
+                    ))
+                })?;
                 if !archive.items.iter().any(|item| {
                     matches!(item, RolloutItem::ResponseItem(envelope) if is_original_context(&envelope.item))
                 }) {

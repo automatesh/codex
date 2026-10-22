@@ -299,6 +299,20 @@ fn prepared_background_input_requires_the_same_effective_context() {
 
 #[tokio::test]
 async fn resume_instructions_load_original_paginated_archive_through_live_thread() {
+    assert_original_paginated_archive_bootstrap(false, false).await;
+}
+
+#[tokio::test]
+async fn resume_instructions_rebuild_fork_before_child_rollout_exists() {
+    assert_original_paginated_archive_bootstrap(true, false).await;
+}
+
+#[tokio::test]
+async fn resume_instructions_rebuild_ephemeral_fork_from_frozen_prefix() {
+    assert_original_paginated_archive_bootstrap(true, true).await;
+}
+
+async fn assert_original_paginated_archive_bootstrap(fork: bool, ephemeral: bool) {
     use codex_history::ResumedHistory;
     use codex_protocol::models::BaseInstructions;
     use codex_protocol::protocol::SessionSource;
@@ -324,37 +338,35 @@ async fn resume_instructions_load_original_paginated_archive_through_live_thread
         },
         None,
     ));
-    let live = LiveThread::create(
-        Arc::clone(&store),
-        CreateThreadParams {
-            creator_user_id: None,
-            creator_account_id: None,
-            session_id: session.session_id(),
-            thread_id: session.thread_id,
-            extra_config: None,
-            forked_from_id: None,
-            parent_thread_id: None,
-            source: SessionSource::Exec,
-            thread_source: None,
-            originator: "instruction-resume-test".into(),
-            base_instructions: BaseInstructions::default(),
-            dynamic_tools: Vec::new(),
-            selected_capability_roots: Vec::new(),
-            multi_agent_version: None,
-            history_mode: ThreadHistoryMode::Paginated,
-            subagent_history_start_ordinal: None,
-            history_base: None,
-            initial_window_id: uuid::Uuid::now_v7().to_string(),
-            runtime_workspace_roots: None,
-            metadata: ThreadPersistenceMetadata {
-                cwd: Some(config.cwd.to_path_buf()),
-                model_provider: config.model_provider_id.clone(),
-                memory_mode: ThreadMemoryMode::Disabled,
-            },
+    let create_params = CreateThreadParams {
+        creator_user_id: None,
+        creator_account_id: None,
+        session_id: session.session_id(),
+        thread_id: session.thread_id,
+        extra_config: None,
+        forked_from_id: None,
+        parent_thread_id: None,
+        source: SessionSource::Exec,
+        thread_source: None,
+        originator: "instruction-resume-test".into(),
+        base_instructions: BaseInstructions::default(),
+        dynamic_tools: Vec::new(),
+        selected_capability_roots: Vec::new(),
+        multi_agent_version: None,
+        history_mode: ThreadHistoryMode::Paginated,
+        subagent_history_start_ordinal: None,
+        history_base: None,
+        initial_window_id: uuid::Uuid::now_v7().to_string(),
+        runtime_workspace_roots: None,
+        metadata: ThreadPersistenceMetadata {
+            cwd: Some(config.cwd.to_path_buf()),
+            model_provider: config.model_provider_id.clone(),
+            memory_mode: ThreadMemoryMode::Disabled,
         },
-    )
-    .await
-    .unwrap();
+    };
+    let live = LiveThread::create(Arc::clone(&store), create_params.clone())
+        .await
+        .unwrap();
     let task = message("user", "original task before compaction", Some("user.text"));
     let summary = checkpoint(vec![message(
         "user",
@@ -371,15 +383,60 @@ async fn resume_instructions_load_original_paginated_archive_through_live_thread
     assert!(live.load_history(true).await.is_err());
     let path = live.local_rollout_path().await.unwrap().unwrap();
     let before = std::fs::read(&path).unwrap();
+    let history = if fork {
+        let lines = std::fs::read_to_string(&path)
+            .unwrap()
+            .lines()
+            .map(|line| serde_json::from_str::<codex_rollout::RolloutLine>(line).unwrap())
+            .collect::<Vec<_>>();
+        let history_base = codex_protocol::protocol::HistoryPosition {
+            thread_id: session.thread_id,
+            end_ordinal_exclusive: lines.last().unwrap().ordinal.unwrap() + 1,
+            end_byte_offset: before.len() as u64,
+        };
+        let source_meta = lines.first().unwrap().item.clone();
+        session.thread_id = codex_protocol::ThreadId::new();
+        session.fork_persistence = ForkPersistence::Referenced {
+            history_base: Some(history_base),
+            inherited_item_count: 2,
+        };
+        if !ephemeral {
+            let child = LiveThread::create(
+                Arc::clone(&store),
+                CreateThreadParams {
+                    thread_id: session.thread_id,
+                    forked_from_id: Some(create_params.thread_id),
+                    history_base: Some(history_base),
+                    ..create_params
+                },
+            )
+            .await
+            .unwrap();
+            session.services.live_thread = Some(child);
+        } else {
+            session.services.live_thread = None;
+        }
+        live.append_items(&[RolloutItem::ResponseItem(message(
+            "user",
+            "source work after frozen fork",
+            Some("user.text"),
+        ))])
+        .await
+        .unwrap();
+        live.flush().await.unwrap();
+        InitialHistory::Forked(vec![source_meta, summary])
+    } else {
+        session.services.live_thread = Some(live.clone());
+        InitialHistory::Resumed(ResumedHistory {
+            conversation_id: session.thread_id,
+            history: Arc::new(vec![summary]),
+            history_revision: None,
+            rollout_path: Some(path.clone()),
+        })
+    };
     session.services.thread_store = store;
-    session.services.live_thread = Some(live);
     let session = Arc::new(session);
-    let history = InitialHistory::Resumed(ResumedHistory {
-        conversation_id: session.thread_id,
-        history: Arc::new(vec![summary]),
-        history_revision: None,
-        rollout_path: Some(path.clone()),
-    });
+    let archive_before_bootstrap = std::fs::read(&path).unwrap();
     session
         .prepare_resume_instruction_context(&history)
         .await
@@ -405,8 +462,18 @@ async fn resume_instructions_load_original_paginated_archive_through_live_thread
             .iter()
             .any(|item| matches!(item, RolloutItem::Compacted(_)))
     );
-    assert_eq!(std::fs::read(path).unwrap(), before);
-    session.live_thread().unwrap().shutdown().await.unwrap();
+    assert!(!rebuilt.items.iter().any(|item| matches!(item,
+        RolloutItem::ResponseItem(envelope) if envelope.item == message(
+            "user", "source work after frozen fork", Some("user.text"),
+        ).item
+    )));
+    assert_eq!(std::fs::read(path).unwrap(), archive_before_bootstrap);
+    if fork && let Some(child) = session.live_thread() {
+        let child_path = child.local_rollout_path().await.unwrap();
+        assert!(child_path.as_ref().is_none_or(|path| !path.exists()));
+        child.discard().await.unwrap();
+    }
+    live.shutdown().await.unwrap();
 }
 
 #[tokio::test]

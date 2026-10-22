@@ -1,4 +1,5 @@
 use codex_protocol::ThreadId;
+use codex_protocol::protocol::HistoryPosition;
 use codex_protocol::protocol::ThreadHistoryMode;
 use codex_rollout::RolloutItem;
 use std::any::Any;
@@ -213,6 +214,20 @@ pub trait ThreadStore: Any + Send + Sync {
         params: LoadThreadHistoryParams,
     ) -> ThreadStoreFuture<'_, StoredThreadHistory> {
         self.load_history(params)
+    }
+
+    /// Loads complete original history from a fork's exact frozen source prefix, before the
+    /// child is persisted. Implementations must not substitute the source's latest history.
+    fn load_instruction_history_for_fork(
+        &self,
+        _params: LoadThreadHistoryParams,
+        _history_base: HistoryPosition,
+    ) -> ThreadStoreFuture<'_, StoredThreadHistory> {
+        Box::pin(async {
+            Err(ThreadStoreError::Unsupported {
+                operation: "load_instruction_history_for_fork",
+            })
+        })
     }
 
     /// Loads the persisted rollout items needed to reconstruct the latest model-visible context.

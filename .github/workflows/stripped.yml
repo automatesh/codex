@@ -9,6 +9,10 @@ on:
         description: Run only the model independent prefix regression
         type: boolean
         default: false
+      resume_only:
+        description: Build Windows and verify the protected resume and archive paths
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -44,26 +48,26 @@ jobs:
         if: ${{ inputs.prefix_only != true }}
         run: cargo check --locked -p codex-cli
       - name: Test telemetry removal and retained local diagnostics
-        if: ${{ inputs.prefix_only != true }}
+        if: ${{ inputs.prefix_only != true && inputs.resume_only != true }}
         run: cargo test --locked -p codex-analytics -p codex-feedback -p codex-otel -- --test-threads=1
       - name: Diagnose HTTP test environment
-        if: ${{ !cancelled() && inputs.prefix_only != true }}
+        if: ${{ !cancelled() && inputs.prefix_only != true && inputs.resume_only != true }}
         run: |
           for key in CODEX_CA_CERTIFICATE SSL_CERT_FILE; do
             if [[ -v "$key" ]]; then echo "$key=set"; else echo "$key=unset"; fi
           done
           cargo tree --locked -p codex-http-client -e features -i reqwest@0.12.28
       - name: Test HTTP client independently
-        if: ${{ !cancelled() && inputs.prefix_only != true }}
+        if: ${{ !cancelled() && inputs.prefix_only != true && inputs.resume_only != true }}
         run: cargo test --locked -p codex-http-client -- --test-threads=1
       - name: Test configuration and metadata boundaries
-        if: ${{ !cancelled() && inputs.prefix_only != true }}
+        if: ${{ !cancelled() && inputs.prefix_only != true && inputs.resume_only != true }}
         run: cargo test --locked -p codex-core --test stripped_config -- --test-threads=1
       - name: Test accepted instruction sources and local attribution
-        if: ${{ !cancelled() && inputs.prefix_only != true }}
+        if: ${{ !cancelled() && inputs.prefix_only != true && inputs.resume_only != true }}
         run: cargo test --locked -p codex-instruction-control -p codex-home -p codex-hooks -p codex-skills-extension -p codex-git-attribution -- --test-threads=1
       - name: Test instruction verification and session reconstruction
-        if: ${{ !cancelled() && inputs.prefix_only != true }}
+        if: ${{ !cancelled() && inputs.prefix_only != true && inputs.resume_only != true }}
         run: |
           result=0
           for filter in \
@@ -81,24 +85,27 @@ jobs:
             cargo test --locked -p codex-core --lib "$filter" -- --test-threads=1 || result=1
           done
           exit "$result"
+      - name: Test protected resume and frozen fork reconstruction
+        if: ${{ !cancelled() && inputs.resume_only == true }}
+        run: cargo test --locked -p codex-core --lib resume_instructions -- --test-threads=1
       - name: Test full paginated instruction archives and retained history contracts
         if: ${{ !cancelled() && inputs.prefix_only != true }}
         run: |
           cargo test --locked -p codex-thread-store --lib model_context -- --test-threads=1
           cargo test --locked -p codex-thread-store --lib paginated_threads_allow_metadata_reads_and_resume_but_reject_legacy_history_paths -- --test-threads=1
       - name: Test protected backend routing
-        if: ${{ !cancelled() && inputs.prefix_only != true }}
+        if: ${{ !cancelled() && inputs.prefix_only != true && inputs.resume_only != true }}
         run: |
           cargo test --locked -p codex-cli --bin codex protected_backend_routes -- --test-threads=1
           cargo test --locked -p codex-tui --lib protected_launch_ -- --test-threads=1
       - name: Test model independent prefix rules
-        if: ${{ !cancelled() }}
+        if: ${{ !cancelled() && inputs.resume_only != true }}
         run: cargo test --locked -p codex-core --test all prefix_rules_model_independence -- --test-threads=1
       - name: Build coding and research CLI
-        if: ${{ !cancelled() && inputs.prefix_only != true }}
+        if: ${{ !cancelled() && inputs.prefix_only != true && inputs.resume_only != true }}
         run: cargo build --locked -p codex-cli --bin codex
       - name: Check CLI startup
-        if: ${{ !cancelled() && inputs.prefix_only != true }}
+        if: ${{ !cancelled() && inputs.prefix_only != true && inputs.resume_only != true }}
         run: |
           target/debug/codex --version
           target/debug/codex exec --help

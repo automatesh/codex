@@ -196,11 +196,7 @@ pub fn upgrade(distribution: &Path) -> Result<()> {
         }
         for (name, input) in &mut inputs {
             let name = *name;
-            copy_locked(
-                input,
-                &staging.join("new").join(name),
-                &next.binaries[name],
-            )?;
+            copy_locked(input, &staging.join("new").join(name), &next.binaries[name])?;
             copy_locked(
                 &mut locked_file(&root.join(name))?,
                 &staging.join("old").join(name),

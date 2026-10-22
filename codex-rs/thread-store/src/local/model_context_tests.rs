@@ -482,6 +482,20 @@ async fn replays_nested_archived_lineage_from_frozen_prefix() {
         serde_json::to_value(archive.items).unwrap(),
         serde_json::to_value(&expected_archive).unwrap()
     );
+    let before_child = store
+        .load_instruction_history_for_fork(
+            LoadThreadHistoryParams {
+                thread_id: child_id,
+                include_archived: true,
+            },
+            history_position(&middle_path, middle_id, 6),
+        )
+        .await
+        .expect("load fork prefix ending in an ancestor rollout");
+    assert_eq!(
+        serde_json::to_value(before_child.items).unwrap(),
+        serde_json::to_value(&expected_archive[..8]).unwrap()
+    );
     assert_eq!(
         serde_json::to_value(&context.items).expect("serialize context"),
         serde_json::to_value(&expected).expect("serialize expected context")
@@ -522,6 +536,69 @@ async fn replays_nested_archived_lineage_from_frozen_prefix() {
             .iter()
             .all(|path| !path.exists())
     );
+}
+
+#[tokio::test]
+async fn instruction_archive_for_unpersisted_fork_reads_only_its_frozen_prefix() {
+    let home = TempDir::new().unwrap();
+    let uuid = Uuid::from_u128(2011);
+    let source_id = ThreadId::from_string(&uuid.to_string()).unwrap();
+    let original = user_message("original task before compaction");
+    let checkpoint = compacted("obsolete summary", Some(Vec::new()));
+    let path = write_ordinaled_paginated_rollout(
+        home.path(),
+        "2025-01-03T13-02-01",
+        uuid,
+        [original.clone(), checkpoint.clone()],
+    );
+    let frozen = history_position(&path, source_id, 3);
+    let metadata = codex_rollout::read_session_meta_line(&path).await.unwrap();
+    let before = std::fs::read(&path).unwrap();
+    // Source writes after fork preparation must not enter the child's reconstruction, even if
+    // they would make a full latest-source scan fail.
+    append_items(&path, [user_message("source work after fork")]);
+    writeln!(
+        OpenOptions::new().append(true).open(&path).unwrap(),
+        "invalid record after fork"
+    )
+    .unwrap();
+    let after = std::fs::read(&path).unwrap();
+    let store = LocalThreadStore::new(test_config(home.path()), None);
+    let params = LoadThreadHistoryParams {
+        thread_id: source_id,
+        include_archived: true,
+    };
+    assert!(
+        store
+            .load_instruction_history(params.clone())
+            .await
+            .is_err()
+    );
+    let expected = vec![RolloutItem::SessionMeta(metadata), original, checkpoint];
+    for compressed in [false, true] {
+        if compressed {
+            let input = std::fs::File::open(&path).unwrap();
+            let output = std::fs::File::create(path.with_extension("jsonl.zst")).unwrap();
+            zstd::stream::copy_encode(input, output, 3).unwrap();
+            std::fs::remove_file(&path).unwrap();
+        }
+        let archive = store
+            .load_instruction_history_for_fork(params.clone(), frozen)
+            .await
+            .unwrap();
+        assert_eq!(archive.thread_id, source_id);
+        assert!(archive.revision.is_none());
+        assert_eq!(
+            serde_json::to_value(&archive.items).unwrap(),
+            serde_json::to_value(&expected).unwrap()
+        );
+    }
+    assert!(after.starts_with(&before));
+    let decoded =
+        zstd::stream::decode_all(std::fs::File::open(path.with_extension("jsonl.zst")).unwrap())
+            .unwrap();
+    assert_eq!(decoded, after);
+    assert!(!path.exists());
 }
 
 #[tokio::test]

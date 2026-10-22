@@ -59,6 +59,45 @@ pub(super) async fn load_instruction_history(
     })
 }
 
+pub(super) async fn load_instruction_history_for_fork(
+    store: &LocalThreadStore,
+    params: LoadThreadHistoryParams,
+    history_base: HistoryPosition,
+) -> ThreadStoreResult<StoredThreadHistory> {
+    let resolved = if params.include_archived {
+        thread_rollout_resolver::resolve_current_including_archived(store, params.thread_id).await?
+    } else {
+        thread_rollout_resolver::resolve_current(store, params.thread_id).await?
+    }
+    .ok_or_else(|| ThreadStoreError::InvalidRequest {
+        message: format!("no rollout found for fork source {}", params.thread_id),
+    })?;
+    let session_meta = codex_rollout::read_session_meta_line(&resolved.path)
+        .await
+        .map_err(|error| ThreadStoreError::Internal {
+            message: format!("failed to read fork source metadata: {error}"),
+        })?;
+    if session_meta.meta.id != params.thread_id
+        || session_meta.meta.history_mode != ThreadHistoryMode::Paginated
+    {
+        return Err(ThreadStoreError::InvalidRequest {
+            message: "fork source metadata does not match the paginated source thread".into(),
+        });
+    }
+    let lineage = store
+        .resolve_rollout_lineage(params.thread_id, Some(resolved.path))
+        .await?
+        .truncate_at(history_base)
+        .await?;
+    let items = scan_model_context_from_lineage(lineage, session_meta, ContextExtent::Full).await?;
+    Ok(StoredThreadHistory {
+        thread_id: params.thread_id,
+        items,
+        // A frozen prefix is not a revision of the source's current complete rollout.
+        revision: None,
+    })
+}
+
 async fn load_context(
     store: &LocalThreadStore,
     params: LoadThreadHistoryParams,
