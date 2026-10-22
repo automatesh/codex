@@ -24,6 +24,7 @@ use std::path::Path;
 use std::path::PathBuf;
 use std::ptr;
 use windows_sys::Win32::Foundation::CloseHandle;
+use windows_sys::Win32::Foundation::FILETIME;
 use windows_sys::Win32::Foundation::LocalFree;
 use windows_sys::Win32::Foundation::WAIT_OBJECT_0;
 use windows_sys::Win32::Security::ACCESS_ALLOWED_ACE;
@@ -50,6 +51,8 @@ use windows_sys::Win32::Storage::FileSystem::MOVEFILE_WRITE_THROUGH;
 use windows_sys::Win32::Storage::FileSystem::MoveFileExW;
 use windows_sys::Win32::System::Com::CoTaskMemFree;
 use windows_sys::Win32::System::Threading::GetExitCodeProcess;
+use windows_sys::Win32::System::Threading::GetProcessId;
+use windows_sys::Win32::System::Threading::GetProcessTimes;
 use windows_sys::Win32::System::Threading::WaitForSingleObject;
 use windows_sys::Win32::UI::Shell::FOLDERID_ProgramFilesX64;
 use windows_sys::Win32::UI::Shell::SEE_MASK_NOCLOSEPROCESS;
@@ -533,6 +536,45 @@ fn elevate(executable: &Path, args: &[&OsStr]) -> Result<()> {
             return Err(last_error("reading manager result"));
         }
         if code != 0 {
+            if args.first() == Some(&OsStr::new("upgrade")) {
+                let pid = unsafe { GetProcessId(info.hProcess) };
+                let diagnostic = (|| -> Result<Option<String>> {
+                    let mut created: FILETIME = unsafe { std::mem::zeroed() };
+                    let mut exited = created;
+                    let mut kernel = created;
+                    let mut user = created;
+                    if unsafe {
+                        GetProcessTimes(
+                            info.hProcess,
+                            &mut created,
+                            &mut exited,
+                            &mut kernel,
+                            &mut user,
+                        )
+                    } == 0
+                    {
+                        return Err(last_error("reading elevated child creation time"));
+                    }
+                    let created = (u64::from(created.dwHighDateTime) << 32)
+                        | u64::from(created.dwLowDateTime);
+                    upgrade::read_error_log(&install_dir()?, pid, created)
+                })();
+                match diagnostic {
+                    Ok(Some(message)) => {
+                        bail!("elevated binary upgrade failed (exit {code}): {message}");
+                    }
+                    Ok(None) => {
+                        bail!(
+                            "elevated binary upgrade failed (exit {code}); no protected diagnostic was recorded for child process {pid}"
+                        );
+                    }
+                    Err(error) => {
+                        bail!(
+                            "elevated binary upgrade failed (exit {code}); protected diagnostic unavailable: {error:#}"
+                        );
+                    }
+                }
+            }
             bail!("administrator review was cancelled or failed (exit {code})");
         }
         Ok(())

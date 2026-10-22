@@ -4,6 +4,56 @@ use windows_sys::Win32::Storage::FileSystem::FILE_SHARE_DELETE;
 pub(super) const IN_PROGRESS: &str = "binary-upgrade-in-progress.json";
 const STAGING: &str = "binary-upgrade-staging";
 const MANIFEST: &str = "installation.json";
+const MAX_ERROR_BYTES: usize = 32 * 1024;
+
+fn error_log_path(root: &Path, pid: u32) -> Result<PathBuf> {
+    if pid == 0 {
+        bail!("Windows did not return an elevated child process ID");
+    }
+    Ok(root.join(format!("binary-upgrade-error-{pid}.log")))
+}
+
+fn bounded_error(error: &anyhow::Error) -> String {
+    let mut message = format!("{error:#}");
+    if message.len() > MAX_ERROR_BYTES {
+        const SUFFIX: &str = "\n[error truncated]";
+        let mut end = MAX_ERROR_BYTES - SUFFIX.len();
+        while !message.is_char_boundary(end) {
+            end -= 1;
+        }
+        message.truncate(end);
+        message.push_str(SUFFIX);
+    }
+    message
+}
+
+fn record_error(root: &Path, pid: u32, error: &anyhow::Error) -> Result<()> {
+    verify_acl(root)?;
+    let path = error_log_path(root, pid)?;
+    // Existing paths are never followed or replaced, including stale PID-reuse records.
+    write_new(&path, bounded_error(error).as_bytes())
+}
+
+pub(super) fn read_error_log(root: &Path, pid: u32, child_created: u64) -> Result<Option<String>> {
+    verify_acl(root)?;
+    let path = error_log_path(root, pid)?;
+    if !path.try_exists()? {
+        return Ok(None);
+    }
+    verify_acl(&path)?;
+    let input = locked_file(&path)?;
+    if input.metadata()?.creation_time() < child_created {
+        bail!("protected upgrade diagnostic belongs to an earlier use of this process ID");
+    }
+    let mut bytes = Vec::new();
+    input
+        .take(MAX_ERROR_BYTES as u64 + 1)
+        .read_to_end(&mut bytes)?;
+    if bytes.len() > MAX_ERROR_BYTES {
+        bail!("protected upgrade diagnostic exceeds the byte limit");
+    }
+    Ok(Some(String::from_utf8(bytes)?))
+}
 
 fn replacement_names() -> impl Iterator<Item = &'static str> {
     DISTRIBUTION_BINARIES.into_iter().chain([MANIFEST])
@@ -130,6 +180,18 @@ fn remove_staging(root: &Path, staging: &Path) -> Result<()> {
 
 /// Upgrade only binaries. Neither accepted instruction state nor the user's .codex is written.
 pub fn upgrade(distribution: &Path) -> Result<()> {
+    let result = upgrade_inner(distribution);
+    if let Err(error) = &result
+        && is_elevated().unwrap_or(false)
+        && let Ok(root) = install_dir()
+    {
+        // Reporting must never replace the actual failure or require another privilege action.
+        let _ = record_error(&root, std::process::id(), error);
+    }
+    result
+}
+
+fn upgrade_inner(distribution: &Path) -> Result<()> {
     reject_reparse(distribution)?;
     let distribution = std::fs::canonicalize(distribution)?;
     let root = install_dir()?;
@@ -255,6 +317,38 @@ pub fn upgrade(distribution: &Path) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn upgrade_diagnostic_is_bounded_and_preserves_utf8_and_error_chain() {
+        let error = anyhow::anyhow!("underlying Windows failure").context("operation failed");
+        assert_eq!(
+            bounded_error(&error),
+            "operation failed: underlying Windows failure"
+        );
+        let long_error = anyhow::anyhow!("failure {}", "\u{1f6a8}".repeat(MAX_ERROR_BYTES));
+        let bounded = bounded_error(&long_error);
+        assert!(bounded.len() <= MAX_ERROR_BYTES);
+        assert!(bounded.ends_with("[error truncated]"));
+    }
+
+    #[test]
+    fn upgrade_diagnostic_path_uses_only_a_nonzero_child_pid() {
+        let root = Path::new("C:/Program Files/CodexStripped");
+        assert_eq!(
+            error_log_path(root, 12345).unwrap(),
+            root.join("binary-upgrade-error-12345.log")
+        );
+        assert!(error_log_path(root, 0).is_err());
+    }
+
+    #[test]
+    fn upgrade_diagnostic_rejects_unprotected_storage_without_writing() {
+        let directory = tempfile::tempdir().unwrap();
+        let error = anyhow::anyhow!("test failure");
+        assert!(record_error(directory.path(), 12345, &error).is_err());
+        assert!(read_error_log(directory.path(), 12345, 0).is_err());
+        assert!(!error_log_path(directory.path(), 12345).unwrap().exists());
+    }
 
     fn fixture() -> (tempfile::TempDir, PathBuf, PathBuf) {
         let temporary = tempfile::tempdir().unwrap();
