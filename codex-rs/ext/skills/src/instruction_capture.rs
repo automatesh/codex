@@ -9,7 +9,7 @@ use crate::HostSkillsLoadInput;
 use crate::HostSkillsService;
 
 const MAX_CAPTURE_FILES: usize = 8192;
-const MAX_CAPTURE_BYTES: usize = 24 * 1024 * 1024;
+const MAX_CAPTURE_BYTES: usize = 48 * 1024 * 1024;
 
 /// Collects a review candidate without running skills, hooks, or model requests.
 pub async fn capture_instruction_sources(
@@ -120,10 +120,12 @@ fn insert_source(
     }
     *total_bytes += source.content.len();
     if captured.len() >= MAX_CAPTURE_FILES || *total_bytes > MAX_CAPTURE_BYTES {
-        return Err(
-            "Skill candidate exceeds 8192 files or 24 MiB; no partial package was accepted"
-                .to_string(),
-        );
+        return Err(format!(
+            "Skill candidate exceeds 8192 files or 48 MiB: {} sources, {} encoded bytes at {}; no partial package was accepted",
+            captured.len() + 1,
+            total_bytes,
+            source.logical_id,
+        ));
     }
     captured.insert(key, source);
     Ok(())
