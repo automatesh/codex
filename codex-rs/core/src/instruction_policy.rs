@@ -344,6 +344,7 @@ mod tests {
         Prompt {
             base_instructions: codex_protocol::models::BaseInstructions {
                 text: String::new(),
+                ..Default::default()
             },
             ..Default::default()
         }
