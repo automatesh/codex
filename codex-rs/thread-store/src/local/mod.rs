@@ -577,6 +577,13 @@ impl ThreadStore for LocalThreadStore {
         Box::pin(LocalThreadStore::load_history(self, params))
     }
 
+    fn load_instruction_history(
+        &self,
+        params: LoadThreadHistoryParams,
+    ) -> ThreadStoreFuture<'_, StoredThreadHistory> {
+        Box::pin(async move { model_context::load_instruction_history(self, params).await })
+    }
+
     fn load_latest_model_context(
         &self,
         params: LoadThreadHistoryParams,

@@ -59,6 +59,9 @@ use windows_sys::Win32::UI::Shell::ShellExecuteExW;
 use windows_sys::Win32::UI::WindowsAndMessaging::SW_SHOWNORMAL;
 
 mod review_ui;
+mod upgrade;
+
+pub use upgrade::upgrade;
 
 pub const DISTRIBUTION_BINARIES: [&str; 7] = [
     "codex.exe",
@@ -339,6 +342,11 @@ struct Installation {
 
 fn installation(root: &Path) -> Result<Installation> {
     verify_acl(root)?;
+    if root.join(upgrade::IN_PROGRESS).try_exists()? {
+        bail!(
+            "protected binary upgrade is incomplete; do not launch Codex until the administrator restores or completes the reviewed installation"
+        );
+    }
     let path = root.join("installation.json");
     verify_acl(&path)?;
     let manifest: Installation = serde_json::from_reader(locked_file(&path)?)?;

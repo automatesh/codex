@@ -39,7 +39,7 @@ jobs:
           sudo apt-get install -y libcap-dev libssl-dev pkg-config clang
       - name: Check changed crate formatting
         if: ${{ inputs.prefix_only != true }}
-        run: cargo fmt -p codex-analytics -p codex-feedback -p codex-otel -p codex-http-client -p codex-core -p codex-app-server -p codex-cli -p codex-instruction-control -p codex-home -p codex-hooks -p codex-skills-extension -p codex-git-attribution -p codex-config -p codex-history -- --check
+        run: cargo fmt -p codex-analytics -p codex-feedback -p codex-otel -p codex-http-client -p codex-core -p codex-app-server -p codex-cli -p codex-instruction-control -p codex-home -p codex-hooks -p codex-skills-extension -p codex-git-attribution -p codex-config -p codex-history -p codex-thread-store -- --check
       - name: Check full CLI without Guardian or OpenTelemetry
         if: ${{ inputs.prefix_only != true }}
         run: cargo check --locked -p codex-cli
@@ -81,6 +81,11 @@ jobs:
             cargo test --locked -p codex-core --lib "$filter" -- --test-threads=1 || result=1
           done
           exit "$result"
+      - name: Test full paginated instruction archives and retained history contracts
+        if: ${{ !cancelled() && inputs.prefix_only != true }}
+        run: |
+          cargo test --locked -p codex-thread-store --lib model_context -- --test-threads=1
+          cargo test --locked -p codex-thread-store --lib paginated_threads_allow_metadata_reads_and_resume_but_reject_legacy_history_paths -- --test-threads=1
       - name: Test protected backend routing
         if: ${{ !cancelled() && inputs.prefix_only != true }}
         run: |

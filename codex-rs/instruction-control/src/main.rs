@@ -63,6 +63,11 @@ enum Command {
         #[arg(long)]
         candidate: PathBuf,
     },
+    /// Replace installed binaries after UAC and review, preserving accepted instructions.
+    Upgrade {
+        #[arg(long)]
+        distribution: PathBuf,
+    },
 }
 
 fn read_snapshot(path: &Path) -> Result<PolicySnapshot> {
@@ -217,6 +222,17 @@ fn main() -> Result<()> {
             {
                 let _ = (distribution, candidate);
                 bail!("protected installation requires Windows")
+            }
+        }
+        Command::Upgrade { distribution } => {
+            #[cfg(windows)]
+            {
+                codex_instruction_control::windows::upgrade(&distribution)
+            }
+            #[cfg(not(windows))]
+            {
+                let _ = distribution;
+                bail!("protected binary upgrades require Windows")
             }
         }
     }

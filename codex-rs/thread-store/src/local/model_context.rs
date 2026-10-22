@@ -18,12 +18,19 @@ use super::rollout_lineage::RolloutLineage;
 use super::thread_rollout_resolver;
 use crate::LoadThreadHistoryParams;
 use crate::StoredModelContext;
+use crate::StoredThreadHistory;
 use crate::ThreadStoreError;
 use crate::ThreadStoreResult;
 
 #[cfg(test)]
 #[path = "model_context_tests.rs"]
 mod tests;
+
+#[derive(Clone, Copy)]
+enum ContextExtent {
+    Latest,
+    Full,
+}
 
 /// Loads rollout items needed to reconstruct the latest model-visible context.
 ///
@@ -37,6 +44,26 @@ pub(super) async fn load_latest_model_context(
     store: &LocalThreadStore,
     params: LoadThreadHistoryParams,
 ) -> ThreadStoreResult<StoredModelContext> {
+    load_context(store, params, ContextExtent::Latest).await
+}
+
+pub(super) async fn load_instruction_history(
+    store: &LocalThreadStore,
+    params: LoadThreadHistoryParams,
+) -> ThreadStoreResult<StoredThreadHistory> {
+    let context = load_context(store, params, ContextExtent::Full).await?;
+    Ok(StoredThreadHistory {
+        thread_id: context.thread_id,
+        items: context.items,
+        revision: context.revision,
+    })
+}
+
+async fn load_context(
+    store: &LocalThreadStore,
+    params: LoadThreadHistoryParams,
+    extent: ContextExtent,
+) -> ThreadStoreResult<StoredModelContext> {
     let resolved = if params.include_archived {
         thread_rollout_resolver::resolve_current_including_archived(store, params.thread_id).await?
     } else {
@@ -49,13 +76,22 @@ pub(super) async fn load_latest_model_context(
                 message: format!("no rollout found for thread id {}", params.thread_id),
             })?;
 
-    load_from_rollout_path(store, params.thread_id, &path).await
+    load_from_rollout_path_with_extent(store, params.thread_id, &path, extent).await
 }
 
 pub(super) async fn load_from_rollout_path(
     store: &LocalThreadStore,
     thread_id: codex_protocol::ThreadId,
     path: &Path,
+) -> ThreadStoreResult<StoredModelContext> {
+    load_from_rollout_path_with_extent(store, thread_id, path, ContextExtent::Latest).await
+}
+
+async fn load_from_rollout_path_with_extent(
+    store: &LocalThreadStore,
+    thread_id: codex_protocol::ThreadId,
+    path: &Path,
+    extent: ContextExtent,
 ) -> ThreadStoreResult<StoredModelContext> {
     let before = super::history_revision::read(path).await;
     let session_meta = codex_rollout::read_session_meta_line(path)
@@ -78,7 +114,7 @@ pub(super) async fn load_from_rollout_path(
         let lineage = store
             .resolve_rollout_lineage(thread_id, Some(path.to_path_buf()))
             .await?;
-        scan_model_context_from_lineage(lineage, session_meta).await?
+        scan_model_context_from_lineage(lineage, session_meta, extent).await?
     } else {
         read_thread::load_history_items(path).await?
     };
@@ -149,7 +185,7 @@ pub(super) async fn load_for_fork(
     match history_base {
         Some(history_base) => {
             let lineage = lineage.truncate_at(history_base).await?;
-            scan_model_context_from_lineage(lineage, session_meta).await
+            scan_model_context_from_lineage(lineage, session_meta, ContextExtent::Latest).await
         }
         None => Ok(vec![RolloutItem::SessionMeta(session_meta)]),
     }
@@ -158,9 +194,10 @@ pub(super) async fn load_for_fork(
 async fn scan_model_context_from_lineage(
     lineage: RolloutLineage,
     session_meta: SessionMetaLine,
+    extent: ContextExtent,
 ) -> ThreadStoreResult<Vec<RolloutItem>> {
     let scan = tokio::task::spawn_blocking(move || {
-        scan_model_context_from_lineage_blocking(&lineage, session_meta)
+        scan_model_context_from_lineage_blocking(&lineage, session_meta, extent)
     })
     .await
     .map_err(|err| ThreadStoreError::Internal {
@@ -177,8 +214,10 @@ async fn scan_model_context_from_lineage(
 fn scan_model_context_from_lineage_blocking(
     lineage: &RolloutLineage,
     session_meta: SessionMetaLine,
+    extent: ContextExtent,
 ) -> io::Result<Vec<RolloutItem>> {
     let mut scan = ModelContextScan::default();
+    let mut full_history = Vec::new();
     'segments: for segment in lineage.segments().iter().rev() {
         let file = codex_rollout::open_rollout_seekable_reader(segment.rollout_path.as_path())?;
         let mut scanner = match segment.end.map(|end| end.end_byte_offset) {
@@ -186,22 +225,35 @@ fn scan_model_context_from_lineage_blocking(
             None => ReverseJsonlScanner::new(file)?,
         };
         while let Some(outcome) = scanner.scan_next_rollout_line()? {
-            let ScanOutcome::Parsed(line) = outcome else {
-                continue;
+            let line = match outcome {
+                ScanOutcome::Parsed(line) => line,
+                ScanOutcome::Rejected(error) if matches!(extent, ContextExtent::Full) => {
+                    return Err(io::Error::new(io::ErrorKind::InvalidData, error));
+                }
+                ScanOutcome::Rejected(_) => continue,
             };
             // Each rollout segment contributes only its local delta. Its session metadata is
             // replaced with the requested thread's canonical SessionMeta after replay.
             if matches!(&line.item, RolloutItem::SessionMeta(_)) {
                 break;
             }
-            match scan.push(line.item) {
-                ModelContextScanProgress::Continue => {}
-                ModelContextScanProgress::Complete => break 'segments,
+            match extent {
+                ContextExtent::Full => full_history.push(line.item),
+                ContextExtent::Latest => match scan.push(line.item) {
+                    ModelContextScanProgress::Continue => {}
+                    ModelContextScanProgress::Complete => break 'segments,
+                },
             }
         }
     }
 
-    let mut items = scan.finish();
+    let mut items = match extent {
+        ContextExtent::Latest => scan.finish(),
+        ContextExtent::Full => {
+            full_history.reverse();
+            full_history
+        }
+    };
     items.insert(0, RolloutItem::SessionMeta(session_meta));
     Ok(items)
 }

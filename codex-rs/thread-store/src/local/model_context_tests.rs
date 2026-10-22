@@ -66,6 +66,18 @@ async fn stops_at_newest_usable_compaction_and_keeps_companions() {
         .await
         .expect("load model context");
 
+    let archive = store
+        .load_instruction_history(LoadThreadHistoryParams {
+            thread_id,
+            include_archived: false,
+        })
+        .await
+        .expect("load complete instruction archive");
+    assert_eq!(
+        serde_json::to_value(archive.items).expect("serialize archive"),
+        serde_json::to_value(read_thread::load_history_items(&path).await.unwrap()).unwrap()
+    );
+
     assert_eq!(
         serde_json::to_value(context.items).expect("serialize context"),
         serde_json::to_value(vec![
@@ -457,6 +469,19 @@ async fn replays_nested_archived_lineage_from_frozen_prefix() {
         turn_context(home.path(), "child-turn"),
         turn_complete("child-turn"),
     ];
+    let mut expected_archive = expected.clone();
+    expected_archive.insert(1, user_message("root before checkpoint"));
+    let archive = store
+        .load_instruction_history(LoadThreadHistoryParams {
+            thread_id: child_id,
+            include_archived: false,
+        })
+        .await
+        .expect("load full frozen lineage before compaction");
+    assert_eq!(
+        serde_json::to_value(archive.items).unwrap(),
+        serde_json::to_value(&expected_archive).unwrap()
+    );
     assert_eq!(
         serde_json::to_value(&context.items).expect("serialize context"),
         serde_json::to_value(&expected).expect("serialize expected context")
@@ -477,6 +502,17 @@ async fn replays_nested_archived_lineage_from_frozen_prefix() {
         })
         .await
         .expect("load compressed lineage model context");
+    let compressed_archive = store
+        .load_instruction_history(LoadThreadHistoryParams {
+            thread_id: child_id,
+            include_archived: false,
+        })
+        .await
+        .expect("load full compressed frozen lineage");
+    assert_eq!(
+        serde_json::to_value(compressed_archive.items).unwrap(),
+        serde_json::to_value(expected_archive).unwrap()
+    );
     assert_eq!(
         serde_json::to_value(compressed_context.items).expect("serialize compressed context"),
         serde_json::to_value(expected).expect("serialize expected context")
@@ -485,6 +521,77 @@ async fn replays_nested_archived_lineage_from_frozen_prefix() {
         [archived_root, middle_path, child_path]
             .iter()
             .all(|path| !path.exists())
+    );
+}
+
+#[tokio::test]
+async fn instruction_archive_rejects_incomplete_records_before_a_usable_checkpoint() {
+    let home = TempDir::new().unwrap();
+    let uuid = Uuid::from_u128(2010);
+    let thread_id = ThreadId::from_string(&uuid.to_string()).unwrap();
+    let path = write_paginated_rollout(
+        home.path(),
+        "2025-01-03T13-02-00",
+        uuid,
+        [user_message("original task")],
+    );
+    writeln!(
+        OpenOptions::new().append(true).open(&path).unwrap(),
+        "invalid JSON"
+    )
+    .unwrap();
+    append_items(&path, [compacted("usable checkpoint", Some(Vec::new()))]);
+    let store = LocalThreadStore::new(test_config(home.path()), None);
+    let params = LoadThreadHistoryParams {
+        thread_id,
+        include_archived: false,
+    };
+    assert!(
+        store
+            .load_latest_model_context(params.clone())
+            .await
+            .is_ok()
+    );
+    assert!(store.load_instruction_history(params).await.is_err());
+}
+
+#[tokio::test]
+#[ignore = "read-only audit: set CODEX_RESUME_AUDIT_HOME and CODEX_RESUME_AUDIT_THREAD"]
+async fn instruction_archive_audit_original_local_lineage() {
+    let home = PathBuf::from(std::env::var_os("CODEX_RESUME_AUDIT_HOME").unwrap());
+    let thread_id =
+        ThreadId::from_string(&std::env::var("CODEX_RESUME_AUDIT_THREAD").unwrap()).unwrap();
+    let store = LocalThreadStore::new(test_config(&home), None);
+    let params = LoadThreadHistoryParams {
+        thread_id,
+        include_archived: true,
+    };
+    let latest = store
+        .load_latest_model_context(params.clone())
+        .await
+        .unwrap();
+    let archive = store.load_instruction_history(params).await.unwrap();
+    assert!(archive.items.len() >= latest.items.len());
+    assert!(
+        matches!(archive.items.first(), Some(RolloutItem::SessionMeta(meta)) if meta.meta.id == thread_id)
+    );
+    assert_eq!(
+        archive
+            .items
+            .iter()
+            .filter(|item| matches!(item, RolloutItem::SessionMeta(_)))
+            .count(),
+        1
+    );
+    println!(
+        "latest_suffix={} full_archive={} compactions={}",
+        latest.items.len(),
+        archive.items.len(),
+        archive
+            .items
+            .iter()
+            .filter(|item| matches!(item, RolloutItem::Compacted(_)))
+            .count()
     );
 }
 

@@ -297,6 +297,172 @@ fn prepared_background_input_requires_the_same_effective_context() {
     ));
 }
 
+#[tokio::test]
+async fn resume_instructions_load_original_paginated_archive_through_live_thread() {
+    use codex_history::ResumedHistory;
+    use codex_protocol::models::BaseInstructions;
+    use codex_protocol::protocol::SessionSource;
+    use codex_protocol::protocol::ThreadMemoryMode;
+    use codex_thread_store::CreateThreadParams;
+    use codex_thread_store::LiveThread;
+    use codex_thread_store::LocalThreadStore;
+    use codex_thread_store::LocalThreadStoreConfig;
+    use codex_thread_store::ThreadPersistenceMetadata;
+    use codex_thread_store::ThreadStore;
+    use codex_utils_absolute_path::AbsolutePathBuf;
+
+    let home = tempfile::tempdir().unwrap();
+    let (mut session, _turn) = crate::session::tests::make_session_and_context().await;
+    let config = session.get_config().await;
+    let store: Arc<dyn ThreadStore> = Arc::new(LocalThreadStore::new(
+        LocalThreadStoreConfig {
+            codex_home: home.path().to_path_buf(),
+            sqlite: codex_state::SqliteConfig::new_for_testing(
+                AbsolutePathBuf::try_from(home.path()).unwrap(),
+            ),
+            default_model_provider_id: config.model_provider_id.clone(),
+        },
+        None,
+    ));
+    let live = LiveThread::create(
+        Arc::clone(&store),
+        CreateThreadParams {
+            creator_user_id: None,
+            creator_account_id: None,
+            session_id: session.session_id(),
+            thread_id: session.thread_id,
+            extra_config: None,
+            forked_from_id: None,
+            parent_thread_id: None,
+            source: SessionSource::Exec,
+            thread_source: None,
+            originator: "instruction-resume-test".into(),
+            base_instructions: BaseInstructions::default(),
+            dynamic_tools: Vec::new(),
+            selected_capability_roots: Vec::new(),
+            multi_agent_version: None,
+            history_mode: ThreadHistoryMode::Paginated,
+            subagent_history_start_ordinal: None,
+            history_base: None,
+            initial_window_id: uuid::Uuid::now_v7().to_string(),
+            runtime_workspace_roots: None,
+            metadata: ThreadPersistenceMetadata {
+                cwd: Some(config.cwd.to_path_buf()),
+                model_provider: config.model_provider_id.clone(),
+                memory_mode: ThreadMemoryMode::Disabled,
+            },
+        },
+    )
+    .await
+    .unwrap();
+    let task = message("user", "original task before compaction", Some("user.text"));
+    let summary = checkpoint(vec![message(
+        "user",
+        "obsolete instructions in the summary",
+        Some("compaction.summary"),
+    )]);
+    live.append_items(&[RolloutItem::ResponseItem(task.clone()), summary.clone()])
+        .await
+        .unwrap();
+    live.persist(codex_thread_store::PersistContext::Standard)
+        .await
+        .unwrap();
+    live.flush().await.unwrap();
+    assert!(live.load_history(true).await.is_err());
+    let path = live.local_rollout_path().await.unwrap().unwrap();
+    let before = std::fs::read(&path).unwrap();
+    session.services.thread_store = store;
+    session.services.live_thread = Some(live);
+    let session = Arc::new(session);
+    let history = InitialHistory::Resumed(ResumedHistory {
+        conversation_id: session.thread_id,
+        history: Arc::new(vec![summary]),
+        history_revision: None,
+        rollout_path: Some(path.clone()),
+    });
+    session
+        .prepare_resume_instruction_context(&history)
+        .await
+        .unwrap();
+    let prepared = session
+        .services
+        .session_extension_data
+        .get::<ResumeInstructionContext>()
+        .unwrap();
+    let rebuilt = rebuild_instruction_history(
+        prepared.full_history.as_ref().unwrap(),
+        prepared.history_mode,
+        prepared.fingerprint.as_deref(),
+        "current guidance",
+    )
+    .unwrap();
+    assert!(rebuilt.items.iter().any(|item| matches!(item,
+        RolloutItem::ResponseItem(envelope) if envelope.item == task.item
+    )));
+    assert!(
+        !rebuilt
+            .items
+            .iter()
+            .any(|item| matches!(item, RolloutItem::Compacted(_)))
+    );
+    assert_eq!(std::fs::read(path).unwrap(), before);
+    session.live_thread().unwrap().shutdown().await.unwrap();
+}
+
+#[tokio::test]
+#[ignore = "read-only audit: set CODEX_RESUME_AUDIT_HOME and CODEX_RESUME_AUDIT_THREAD"]
+async fn resume_instructions_audit_original_local_archive() {
+    use codex_thread_store::LoadThreadHistoryParams;
+    use codex_thread_store::LocalThreadStore;
+    use codex_thread_store::LocalThreadStoreConfig;
+    use codex_thread_store::ThreadStore;
+    use codex_utils_absolute_path::AbsolutePathBuf;
+
+    let home = std::path::PathBuf::from(std::env::var_os("CODEX_RESUME_AUDIT_HOME").unwrap());
+    let thread_id =
+        codex_protocol::ThreadId::from_string(&std::env::var("CODEX_RESUME_AUDIT_THREAD").unwrap())
+            .unwrap();
+    let store = LocalThreadStore::new(
+        LocalThreadStoreConfig {
+            codex_home: home.clone(),
+            sqlite: codex_state::SqliteConfig::new_for_testing(
+                AbsolutePathBuf::try_from(home).unwrap(),
+            ),
+            default_model_provider_id: "openai".into(),
+        },
+        None,
+    );
+    let params = LoadThreadHistoryParams {
+        thread_id,
+        include_archived: true,
+    };
+    let latest = store
+        .load_latest_model_context(params.clone())
+        .await
+        .unwrap();
+    let archive = store.load_instruction_history(params).await.unwrap();
+    let rebuilt = rebuild_instruction_history(
+        &archive.items,
+        ThreadHistoryMode::Legacy,
+        Some("audit-current-instructions"),
+        "current guidance",
+    )
+    .unwrap();
+    assert!(!rebuilt.items.is_empty());
+    assert!(
+        !rebuilt
+            .items
+            .iter()
+            .any(|item| matches!(item, RolloutItem::Compacted(_)))
+    );
+    println!(
+        "latest_suffix={} full_archive={} rebuilt={}",
+        latest.items.len(),
+        archive.items.len(),
+        rebuilt.items.len()
+    );
+}
+
 #[test]
 fn saved_mode_selection_does_not_restore_its_obsolete_instruction_text() {
     let saved = CollaborationMode {

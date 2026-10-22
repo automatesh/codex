@@ -75,14 +75,14 @@ impl Session {
                 "Could not flush the original history before rebuilding instructions: {error}"
             ))
         })?;
-        let archive = live_thread.load_history(true).await.map_err(|error| CodexErr::Fatal(format!(
+        let archive = live_thread.load_instruction_history().await.map_err(|error| CodexErr::Fatal(format!(
             "Could not load full original history under the changed instruction context: {error}. No stale context was sent."
         )))?;
         self.apply_instruction_reconstruction(
             &step.turn,
             &archive.items,
             Some(&fingerprint),
-            // load_history is the full-archive API, unlike load_latest_model_context.
+            // This view includes the complete frozen lineage, not a paginated suffix.
             ThreadHistoryMode::Legacy,
             Some(expected_history),
         )
@@ -146,11 +146,14 @@ impl Session {
                 let Some(live_thread) = self.live_thread() else {
                     return Err(CodexErr::InvalidRequest(original_error));
                 };
-                let archive = live_thread.load_history(true).await.map_err(|error| {
-                    CodexErr::InvalidRequest(format!(
-                        "{original_error} Full archive could not be loaded: {error}"
-                    ))
-                })?;
+                let archive = live_thread
+                    .load_instruction_history()
+                    .await
+                    .map_err(|error| {
+                        CodexErr::InvalidRequest(format!(
+                            "{original_error} Full archive could not be loaded: {error}"
+                        ))
+                    })?;
                 if !archive.items.iter().any(|item| {
                     matches!(item, RolloutItem::ResponseItem(envelope) if is_original_context(&envelope.item))
                 }) {

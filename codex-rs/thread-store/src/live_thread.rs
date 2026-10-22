@@ -325,6 +325,15 @@ impl LiveThread {
             .await
     }
 
+    pub async fn load_instruction_history(&self) -> ThreadStoreResult<StoredThreadHistory> {
+        self.thread_store
+            .load_instruction_history(LoadThreadHistoryParams {
+                thread_id: self.thread_id,
+                include_archived: true,
+            })
+            .await
+    }
+
     pub async fn read_thread(
         &self,
         include_archived: bool,

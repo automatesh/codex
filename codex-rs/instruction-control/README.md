@@ -66,9 +66,21 @@ Run the installed manager's `verify` command without elevation after installatio
 
 An unelevated invocation verifies and launches the **installed protected manager**, which requests UAC and shows the exact old/new review. The manager archives the accepted snapshot, materializes protected source copies, and replaces `active.json` atomically. Concurrent changes during review cause an error requiring another review. Existing processes keep their pinned snapshot; restart Codex to load the newly accepted one.
 
-The `install` command currently refuses an existing installation instead of partially replacing running binaries. Binary upgrades need a separate reviewed installation workflow; `apply` changes instruction snapshots only.
+## Binary upgrades
+
+Close every process running the installed Codex binaries, including app-server/SDK helpers. From the **new distribution outside Program Files**, run:
+
+```powershell
+.\codex-policy-manager.exe upgrade --distribution .
+```
+
+The new helper holds all seven proposed executables open without write/delete sharing, checks that its own digest matches the proposed manager, and requests UAC. Its native review displays every current/proposed binary hash and the accepted snapshot ID. No command-line auto-approval exists. After acceptance it stages protected copies and original backups, then replaces all seven binaries and the binary manifest under the same exclusive lock used for instruction changes. The `Policy` snapshot/source files and user `.codex` are never rewritten; the accepted instructions remain exactly those already installed. Codex is never started elevated.
+
+Busy executables are checked before staging and again before replacement. Replacement failure restores the original files; the manager clears its in-progress marker only after verifying complete restoration. A crash, power loss, or failed rollback can leave protected staging/backups and an in-progress marker; new clients fail closed in that state. Automatic crash recovery and repair are not implemented. Do not delete that marker to force a partial installation to run. A running older client does not gain the new code until restarted.
+
+After a successful upgrade, run the installed manager's `verify` command without elevation, then start the installed Codex normally. `install` still refuses existing installations; `apply` changes instruction snapshots only.
 An interrupted initial installation can leave a protected partial directory; automatic rollback and repair are not implemented. Concurrent `apply` invocations are serialized by an exclusive protected file lock; a competing manager receives a busy error.
 
 ## Checks
 
-The component tests cover source/control tampering, unknown fields, source collisions/traversal, binary assets, exact review contents, unsafe ordinary-user-owned storage, Windows argument quoting, and input file locks. They do not simulate or approve a real UAC prompt, and passing them is not evidence that installation was performed.
+The component tests cover source/control tampering, unknown fields, source collisions/traversal, binary assets, exact review contents, unsafe ordinary-user-owned storage, Windows argument quoting, input file locks, binary replacement, rollback after a partial replacement or failed final validation, unchanged policy bytes, and busy installed inputs. They do not simulate or approve a real UAC prompt, and passing them is not evidence that installation was performed.
