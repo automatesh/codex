@@ -291,6 +291,7 @@ async fn run_remote_compaction_request_v2(
     transport: CompactionRequestTransport<'_>,
 ) -> CodexResult<RemoteCompactionV2Output> {
     let turn_context = &step_context.turn;
+    crate::instruction_policy::verify_prompt(&turn_context.config, prompt)?;
     let client_session = match transport {
         CompactionRequestTransport::Background(turn_state, auth_owner_generation) => {
             let settings = &step_context.settings;
@@ -329,6 +330,7 @@ async fn run_remote_compaction_request_v2(
         .min(MAX_REMOTE_COMPACTION_V2_STREAM_RETRIES);
     let mut retry_state = ResponsesStreamRetryState::default();
     loop {
+        crate::instruction_policy::verify_prompt(&turn_context.config, prompt)?;
         let result = match client_session
             .stream(
                 prompt,

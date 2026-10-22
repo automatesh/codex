@@ -121,8 +121,10 @@ pub(crate) mod plugins;
 pub use plugins::plugins_manager_for_config;
 #[doc(hidden)]
 pub(crate) mod prompt_debug;
+pub use prompt_debug::build_instruction_prompt;
 #[doc(hidden)]
 pub use prompt_debug::build_prompt_input;
+pub mod instruction_policy;
 pub(crate) mod mentions {
     pub(crate) use crate::plugins::build_connector_slug_counts;
     pub(crate) use crate::plugins::collect_explicit_app_ids;
@@ -178,6 +180,7 @@ mod agents_md_manager;
 pub use agents_md::DEFAULT_AGENTS_MD_FILENAME;
 pub use agents_md::LOCAL_AGENTS_MD_FILENAME;
 pub use agents_md::LoadedAgentsMd;
+pub use agents_md::capture_agents_sources;
 mod rollout;
 mod rollout_budget;
 pub(crate) mod safety;

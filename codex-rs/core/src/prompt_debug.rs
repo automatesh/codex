@@ -24,12 +24,31 @@ use crate::thread_manager::thread_store_from_config;
 /// Build the model-visible `input` list for a single debug turn.
 #[doc(hidden)]
 pub async fn build_prompt_input(
-    mut config: Config,
+    config: Config,
     input: Vec<UserInput>,
     state_db: Option<StateDbHandle>,
     extensions: Arc<ExtensionRegistry<Config>>,
     user_instructions_provider: Arc<dyn UserInstructionsProvider>,
 ) -> CodexResult<Vec<ResponseItem>> {
+    build_instruction_prompt(
+        config,
+        input,
+        state_db,
+        extensions,
+        user_instructions_provider,
+    )
+    .await
+    .map(|prompt| prompt.input)
+}
+
+#[doc(hidden)]
+pub async fn build_instruction_prompt(
+    mut config: Config,
+    input: Vec<UserInput>,
+    state_db: Option<StateDbHandle>,
+    extensions: Arc<ExtensionRegistry<Config>>,
+    user_instructions_provider: Arc<dyn UserInstructionsProvider>,
+) -> CodexResult<crate::Prompt> {
     config.ephemeral = true;
 
     let auth_manager =
@@ -73,7 +92,7 @@ pub async fn build_prompt_input(
         .start_thread(StartThreadOptions::new(config))
         .await?;
 
-    let output = build_prompt_input_from_session(&thread.thread.session, input).await;
+    let output = build_instruction_prompt_from_session(&thread.thread.session, input).await;
     let shutdown = thread.thread.shutdown_and_wait().await;
     let _removed = thread_manager.remove_thread(&thread.thread_id).await;
 
@@ -85,6 +104,15 @@ pub(crate) async fn build_prompt_input_from_session(
     sess: &Arc<Session>,
     input: Vec<UserInput>,
 ) -> CodexResult<Vec<ResponseItem>> {
+    build_instruction_prompt_from_session(sess, input)
+        .await
+        .map(|prompt| prompt.input)
+}
+
+async fn build_instruction_prompt_from_session(
+    sess: &Arc<Session>,
+    input: Vec<UserInput>,
+) -> CodexResult<crate::Prompt> {
     let turn_context = sess.new_default_turn().await;
     // Prompt debugging builds a standalone request without entering run_turn.
     let step_context = sess
@@ -116,5 +144,5 @@ pub(crate) async fn build_prompt_input_from_session(
             .await,
     );
 
-    Ok(prompt.input)
+    Ok(prompt)
 }

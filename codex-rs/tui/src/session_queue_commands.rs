@@ -29,6 +29,11 @@ pub async fn run_session_queue_command(
     message: String,
     options: SessionArchiveCommandOptions,
 ) -> Result<String> {
+    if codex_instruction_control::runtime_snapshot().is_some() {
+        return Err(eyre!(
+            "Protected instructions cannot queue work through a shared backend without instruction attestation; send the message in the active embedded conversation."
+        ));
+    }
     if options.cli.no_daemon && options.explicit_remote_endpoint.is_none() {
         return Err(eyre!(
             "--no-daemon cannot be used with codex queue. Queuing must discover the shared server to avoid writing through a separate server."

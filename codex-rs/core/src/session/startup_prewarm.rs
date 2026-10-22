@@ -428,6 +428,7 @@ async fn schedule_startup_prewarm_inner(
         /*status*/ None,
     );
     // Tool discovery may have updated Responses Lite metadata since the eager handshake.
+    crate::instruction_policy::verify_prompt(&startup_turn_context.config, &startup_prompt)?;
     let responses_metadata = session
         .responses_metadata(step_context.as_ref(), CodexResponsesRequestKind::Prewarm)
         .await;

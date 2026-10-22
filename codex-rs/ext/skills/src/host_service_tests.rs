@@ -1012,3 +1012,44 @@ async fn skills_for_config_ignores_cwd_cache_when_session_flags_reenable_skill()
         .expect("demo skill should be discovered");
     assert_eq!(child_outcome.is_skill_enabled(child_skill), true);
 }
+
+#[tokio::test]
+async fn instruction_capture_preserves_plugin_namespace_and_shared_scripts() {
+    let home = tempfile::tempdir().unwrap();
+    let cwd = tempfile::tempdir().unwrap();
+    let main = write_plugin_skill(
+        &home,
+        "test",
+        "sample",
+        "search",
+        "sample-search",
+        "Search sample data",
+    );
+    let plugin_root = main.parent().unwrap().parent().unwrap().parent().unwrap();
+    fs::create_dir_all(plugin_root.join("scripts")).unwrap();
+    let shared_script = plugin_root.join("scripts/shared.py");
+    fs::write(&shared_script, "print('shared package resource')").unwrap();
+    let service = HostSkillsService::new(home.path().abs(), false);
+    let input = HostSkillsLoadInput::new(
+        cwd.path().abs(),
+        vec![plugin_skill_root_for_skill_path(
+            &main,
+            "sample@test",
+            "sample",
+        )],
+        config_stack(&home, "[skills.bundled]\nenabled = false\n"),
+    );
+    let sources = crate::capture_instruction_sources(&service, &input)
+        .await
+        .unwrap();
+    let metadata = sources
+        .iter()
+        .find(|source| source.kind == codex_instruction_control::SourceKind::SkillMetadata)
+        .unwrap();
+    let skill: codex_skills::SkillMetadata = serde_json::from_str(&metadata.content).unwrap();
+    assert_eq!(skill.name, "sample:sample-search");
+    assert_eq!(skill.plugin_id.as_deref(), Some("sample@test"));
+    assert!(sources.iter().any(|source| source.kind
+        == codex_instruction_control::SourceKind::SkillAsset
+        && source.logical_id == shared_script.to_string_lossy()));
+}

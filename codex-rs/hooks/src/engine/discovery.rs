@@ -91,12 +91,155 @@ impl HookDiscoveryPolicy {
     }
 }
 
+/// Captures declarations for explicit review without executing any hook.
+pub fn capture_hook_sources(
+    stack: &ConfigLayerStack,
+    plugin_sources: &[PluginHookSource],
+) -> Result<Vec<codex_instruction_control::PolicySource>, String> {
+    use codex_instruction_control::PolicySource;
+    use codex_instruction_control::SourceKind;
+    if let Some(id) = ambiguous_hook_source(stack, plugin_sources) {
+        return Err(format!(
+            "Ambiguous hook declarations share source identifier {id}; distinct declarations must have distinct source paths before approval"
+        ));
+    }
+    let mut captured = std::collections::BTreeMap::new();
+    let mut warnings = Vec::new();
+    let mut folders = HashSet::new();
+    for layer in stack.layers_low_to_high() {
+        if let Some((path, hooks)) = load_toml_hooks_from_layer(layer, &mut warnings) {
+            captured.insert(path.to_string_lossy().to_string(), hooks);
+        }
+        if let Some(folder) = layer.hooks_config_folder()
+            && folders.insert(folder.clone())
+            && let Some((path, hooks)) = load_hooks_json(Some(folder.as_path()), &mut warnings)
+        {
+            captured.insert(path.to_string_lossy().to_string(), hooks);
+        }
+    }
+    if let Some(managed) = stack.requirements().managed_hooks.as_ref() {
+        let path = managed_hooks_source_path(managed.get(), managed.source.as_ref());
+        captured.insert(
+            path.to_string_lossy().to_string(),
+            managed.get().hooks.clone(),
+        );
+    }
+    for source in plugin_sources {
+        captured.insert(
+            source.source_path.to_string_lossy().to_string(),
+            source.hooks.clone(),
+        );
+    }
+    if !warnings.is_empty() {
+        return Err(warnings.join("\n"));
+    }
+    captured
+        .into_iter()
+        .map(|(id, hooks)| {
+            serde_json::to_string(&hooks)
+                .map(|content| PolicySource::new(SourceKind::Hook, id, content))
+                .map_err(|error| error.to_string())
+        })
+        .collect()
+}
+
+pub(crate) fn verify_approved_hook_presence(
+    snapshot: &codex_instruction_control::PolicySnapshot,
+    stack: Option<&ConfigLayerStack>,
+    plugin_sources: &[PluginHookSource],
+) -> Result<(), String> {
+    use codex_instruction_control::SourceKind;
+    if snapshot.config.controls.hooks == codex_instruction_control::HookControl::Off {
+        return Ok(());
+    }
+    let mut live_ids = HashSet::new();
+    if let Some(stack) = stack {
+        for source in capture_hook_sources(stack, plugin_sources)? {
+            live_ids.insert(source.logical_id);
+        }
+    } else {
+        for source in plugin_sources {
+            live_ids.insert(source.source_path.to_string_lossy().to_string());
+        }
+    }
+    for source in snapshot
+        .sources
+        .iter()
+        .filter(|source| source.kind == SourceKind::Hook)
+    {
+        if !approved_hook_events(snapshot, &source.logical_id)?.is_empty()
+            && !live_ids.contains(&source.logical_id)
+        {
+            return Err(format!(
+                "Accepted hook source is missing from active discovery: {}; restore its declaration or capture and explicitly approve its removal before starting this workspace",
+                source.logical_id
+            ));
+        }
+    }
+    Ok(())
+}
+
+fn ambiguous_hook_source(
+    stack: &ConfigLayerStack,
+    plugin_sources: &[PluginHookSource],
+) -> Option<String> {
+    let mut declarations = HashMap::new();
+    let mut warnings = Vec::new();
+    for layer in stack.layers_low_to_high() {
+        if let Some((path, hooks)) = load_toml_hooks_from_layer(layer, &mut warnings) {
+            let id = path.to_string_lossy().to_string();
+            if declarations
+                .insert(id.clone(), hooks.clone())
+                .is_some_and(|previous| previous != hooks)
+            {
+                return Some(id);
+            }
+        }
+    }
+    if let Some(managed) = stack.requirements().managed_hooks.as_ref() {
+        let id = managed_hooks_source_path(managed.get(), managed.source.as_ref())
+            .to_string_lossy()
+            .to_string();
+        let hooks = managed.get().hooks.clone();
+        if declarations
+            .insert(id.clone(), hooks.clone())
+            .is_some_and(|previous| previous != hooks)
+        {
+            return Some(id);
+        }
+    }
+    for source in plugin_sources {
+        let id = source.source_path.to_string_lossy().to_string();
+        if declarations
+            .insert(id.clone(), source.hooks.clone())
+            .is_some_and(|previous| previous != source.hooks)
+        {
+            return Some(id);
+        }
+    }
+    None
+}
+
 pub(crate) fn discover_handlers(
     config_layer_stack: Option<&ConfigLayerStack>,
     plugin_hook_sources: Vec<PluginHookSource>,
     plugin_hook_load_warnings: Vec<String>,
     bypass_hook_trust: bool,
 ) -> DiscoveryResult {
+    if codex_instruction_control::runtime_snapshot().is_some()
+        && let Some(stack) = config_layer_stack
+        && let Some(id) = ambiguous_hook_source(stack, &plugin_hook_sources)
+    {
+        let warning = format!(
+            "Ambiguous hook declarations share source identifier {id}; protected hook loading stopped without executing any hook"
+        );
+        return DiscoveryResult {
+            handlers: Vec::new(),
+            hook_entries: Vec::new(),
+            warnings: vec![warning.clone()],
+            required_load_errors: vec![warning],
+        };
+    }
     let mut handlers = Vec::new();
     let mut hook_entries = Vec::new();
     let mut warnings = plugin_hook_load_warnings;
@@ -449,17 +592,85 @@ fn escape_xml_text(value: &str) -> String {
     escaped
 }
 
+fn approved_hook_events(
+    snapshot: &codex_instruction_control::PolicySnapshot,
+    logical_id: &str,
+) -> Result<HookEventsToml, String> {
+    let content = snapshot
+        .resolve(codex_instruction_control::SourceKind::Hook, logical_id)
+        .map_err(|error| format!("Hook source {logical_id} is pending approval: {error}"))?;
+    let value: serde_json::Value = serde_json::from_str(content)
+        .map_err(|error| format!("Approved hook source {logical_id} is invalid JSON: {error}"))?;
+    if value.get("hooks").is_some() {
+        serde_json::from_value::<HooksFile>(value).map(|file| file.hooks)
+    } else {
+        serde_json::from_value::<HookEventsToml>(value)
+    }
+    .map_err(|error| format!("Approved hook declarations {logical_id} are invalid: {error}"))
+}
+
 fn append_hook_events(
     handlers: &mut Vec<ConfiguredHandler>,
     hook_entries: &mut Vec<HookListEntry>,
     warnings: &mut Vec<String>,
     display_order: &mut i64,
     mut source: HookHandlerSource<'_>,
-    hook_events: HookEventsToml,
+    mut hook_events: HookEventsToml,
     policy: HookDiscoveryPolicy,
 ) {
     if !policy.allows(&source) {
         return;
+    }
+    if let Some(snapshot) = codex_instruction_control::runtime_snapshot() {
+        if snapshot.config.controls.hooks == codex_instruction_control::HookControl::Off {
+            if matches!(source.requirement, HookRequirement::Required(_)) {
+                source.record_load_failure(
+                    "Hooks are disabled in the accepted snapshot but managed requirements require this hook source; the requirement was not bypassed".to_string(),
+                    warnings,
+                );
+            }
+            return;
+        }
+        let id = source.path.to_string_lossy().to_string();
+        let accepted = match approved_hook_events(&snapshot, &id) {
+            Ok(accepted) => accepted,
+            Err(error) => {
+                source.record_load_failure(error, warnings);
+                return;
+            }
+        };
+        if serde_json::to_value(&accepted).ok() != serde_json::to_value(&hook_events).ok() {
+            warnings.push(format!(
+                "Hook declarations at {id} changed; accepted declarations remain active. Prepare and approve a candidate to update them."
+            ));
+        }
+        hook_events = accepted;
+        source.bypass_hook_trust = false;
+        if source.env.contains_key("PLUGIN_ROOT") || source.env.contains_key("CLAUDE_PLUGIN_ROOT") {
+            let protected_path = match snapshot
+                .source_path(codex_instruction_control::SourceKind::Hook, &id)
+            {
+                Ok(path) => path,
+                Err(error) => {
+                    source.record_load_failure(format!("Protected hook source {id} is unavailable: {error}; no live plugin script fallback was loaded"), warnings);
+                    return;
+                }
+            };
+            for key in ["PLUGIN_ROOT", "CLAUDE_PLUGIN_ROOT"] {
+                if let Some(original_root) = source.env.get(key)
+                    && let Ok(relative) = source.path.as_path().strip_prefix(original_root)
+                {
+                    let mut protected_root = protected_path.clone();
+                    for _ in relative.components() {
+                        protected_root.pop();
+                    }
+                    source.env.insert(
+                        key.to_string(),
+                        protected_root.to_string_lossy().to_string(),
+                    );
+                }
+            }
+        }
     }
 
     for (event_name, groups) in hook_events.into_matcher_groups() {
@@ -675,10 +886,23 @@ fn append_matcher_groups(
                     /*app_connector_id*/ None,
                 )
             });
-            let enabled = hook_enabled(source.is_managed, builtin, state);
+            let protected = codex_instruction_control::runtime_snapshot().is_some();
+            let enabled = if protected {
+                state.and_then(|state| state.enabled) != Some(false)
+            } else {
+                hook_enabled(source.is_managed, builtin, state)
+            };
+            if protected && !enabled {
+                warnings.push(format!(
+                    "Accepted hook {key} is disabled by operational hook state.enabled=false; source approval does not re-enable it"
+                ));
+            }
             let trusted_hash = hook_trusted_hash(source.is_managed, state);
-            let trust_status =
-                hook_trust_status(source.is_managed, builtin, &current_hash, trusted_hash);
+            let trust_status = if protected {
+                HookTrustStatus::Trusted
+            } else {
+                hook_trust_status(source.is_managed, builtin, &current_hash, trusted_hash)
+            };
             let handler = match &kind {
                 ConfiguredHandlerKind::Command {
                     command, r#async, ..
@@ -1746,5 +1970,129 @@ mod tests {
             ),
             (HookSource::LegacyManagedConfigMdm, true),
         );
+    }
+}
+
+#[cfg(test)]
+mod approved_source_tests {
+    use super::approved_hook_events;
+    use codex_instruction_control::ForkConfig;
+    use codex_instruction_control::PolicySnapshot;
+    use codex_instruction_control::PolicySource;
+    use codex_instruction_control::SourceKind;
+
+    fn snapshot(content: &str) -> PolicySnapshot {
+        PolicySnapshot::new(
+            ForkConfig::default(),
+            vec![
+                PolicySource::new(SourceKind::MainPrompt, "main", "main".to_string()),
+                PolicySource::new(
+                    SourceKind::ModelCatalog,
+                    "models",
+                    r#"{"models":[{"slug":"test","model_messages":{}}]}"#.to_string(),
+                ),
+                PolicySource::new(SourceKind::Hook, "approved/hooks.json", content.to_string()),
+            ],
+        )
+        .expect("valid snapshot")
+    }
+
+    #[test]
+    fn deleting_an_accepted_hook_file_is_an_explicit_error() {
+        use codex_config::ConfigLayerEntry;
+        use codex_config::ConfigLayerSource;
+        use codex_config::ConfigLayerStack;
+        use codex_config::ConfigRequirementsToml;
+        use codex_utils_absolute_path::AbsolutePathBuf;
+
+        let directory = tempfile::tempdir().unwrap();
+        let hook_file = directory.path().join("hooks.json");
+        std::fs::write(&hook_file,
+            r#"{"hooks":{"PreToolUse":[{"hooks":[{"type":"command","command":"echo accepted"}]}]}}"#).unwrap();
+        let stack = ConfigLayerStack::new(
+            vec![ConfigLayerEntry::new(
+                ConfigLayerSource::User {
+                    file: AbsolutePathBuf::try_from(directory.path().join("config.toml")).unwrap(),
+                    profile: None,
+                },
+                codex_config::TomlValue::Table(Default::default()),
+            )],
+            Default::default(),
+            ConfigRequirementsToml::default(),
+        )
+        .unwrap();
+        let mut sources = snapshot("{}").sources;
+        sources.retain(|source| source.kind != SourceKind::Hook);
+        sources.extend(super::capture_hook_sources(&stack, &[]).unwrap());
+        assert!(sources.iter().any(|source| source.kind == SourceKind::Hook));
+        let accepted = PolicySnapshot::new(ForkConfig::default(), sources).unwrap();
+        super::verify_approved_hook_presence(&accepted, Some(&stack), &[]).unwrap();
+        std::fs::remove_file(&hook_file).unwrap();
+        let error = super::verify_approved_hook_presence(&accepted, Some(&stack), &[]).unwrap_err();
+        assert!(error.contains("Accepted hook source is missing"));
+        assert!(error.contains("explicitly approve its removal"));
+    }
+
+    #[test]
+    fn approval_is_bound_to_the_hook_source_identifier() {
+        let snapshot = snapshot(
+            r#"{"PreToolUse":[{"hooks":[{"type":"command","command":"echo accepted"}]}]}"#,
+        );
+        let accepted =
+            approved_hook_events(&snapshot, "approved/hooks.json").expect("approved declarations");
+        let rendered = serde_json::to_string(&accepted).expect("serializable declarations");
+        assert!(rendered.contains("echo accepted"));
+        assert!(approved_hook_events(&snapshot, "new/hooks.json").is_err());
+    }
+
+    #[test]
+    fn rejects_distinct_declarations_sharing_a_physical_source_path() {
+        use codex_config::ConfigLayerEntry;
+        use codex_config::ConfigLayerSource;
+        use codex_config::ConfigLayerStack;
+        use codex_config::ConfigRequirementsToml;
+        use codex_config::TomlValue;
+        use codex_utils_absolute_path::AbsolutePathBuf;
+        let directory = tempfile::tempdir().unwrap();
+        let path = AbsolutePathBuf::try_from(directory.path().join("config.toml")).unwrap();
+        let config = |command: &str| {
+            TomlValue::try_from(serde_json::json!({
+                "hooks": {"PreToolUse": [{"hooks": [{"type": "command", "command": command}]}]}
+            }))
+            .unwrap()
+        };
+        let stack = ConfigLayerStack::new(
+            vec![
+                ConfigLayerEntry::new(
+                    ConfigLayerSource::System { file: path.clone() },
+                    config("echo first"),
+                ),
+                ConfigLayerEntry::new(
+                    ConfigLayerSource::User {
+                        file: path,
+                        profile: None,
+                    },
+                    config("echo second"),
+                ),
+            ],
+            Default::default(),
+            ConfigRequirementsToml::default(),
+        )
+        .unwrap();
+        assert!(super::ambiguous_hook_source(&stack, &[]).is_some());
+        assert!(super::capture_hook_sources(&stack, &[]).is_err());
+    }
+
+    #[test]
+    fn standalone_wrapper_and_canonical_events_are_equivalent() {
+        let raw = r#"{"PreToolUse":[{"hooks":[{"type":"command","command":"echo accepted"}]}]}"#;
+        let wrapped = format!("{{\"hooks\":{raw}}}");
+        let direct = approved_hook_events(&snapshot(raw), "approved/hooks.json").unwrap();
+        let wrapped = approved_hook_events(&snapshot(&wrapped), "approved/hooks.json").unwrap();
+        assert_eq!(
+            serde_json::to_value(direct).unwrap(),
+            serde_json::to_value(wrapped).unwrap()
+        );
+        assert!(approved_hook_events(&snapshot("not JSON"), "approved/hooks.json").is_err());
     }
 }

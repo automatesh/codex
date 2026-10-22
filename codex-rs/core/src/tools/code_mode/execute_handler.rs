@@ -83,6 +83,17 @@ impl CodeModeExecuteHandler {
         )
         .map_err(|error| FunctionCallError::Fatal(error.to_string()))?
         .apply_code_mode(&mut enabled_tools);
+        if step_context.turn.config.instruction_snapshot.is_some() {
+            let values = enabled_tools
+                .iter()
+                .map(serde_json::to_value)
+                .collect::<Result<Vec<_>, _>>()
+                .map_err(|error| FunctionCallError::Fatal(error.to_string()))?;
+            let sources = crate::instruction_policy::capture_code_runtime_sources(&values)
+                .map_err(|error| FunctionCallError::Fatal(error.to_string()))?;
+            crate::instruction_policy::verify_sources(&step_context.turn.config, sources)
+                .map_err(|error| FunctionCallError::Fatal(error.to_string()))?;
+        }
         let started_at = std::time::Instant::now();
         let started_cell = exec
             .session

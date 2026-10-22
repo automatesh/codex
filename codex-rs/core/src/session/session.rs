@@ -29,7 +29,6 @@ use codex_http_client::ClientRouteClass;
 use codex_http_client::RouteAwareClientPool;
 use codex_login::auth::AgentIdentityAuthPolicy;
 use codex_model_provider::SharedModelProvider;
-use codex_prompts::render_model_instructions;
 use codex_protocol::SessionId;
 use codex_protocol::capabilities::SelectedCapabilityRoot;
 use codex_protocol::config_types::ShellEnvironmentPolicy;
@@ -827,15 +826,6 @@ impl Session {
                     .clone()
                     .unwrap_or(BaseInstructionsProvenance::Custom),
             )
-        } else if let Some(inherited_base_instructions) = initial_history.get_base_instructions() {
-            let BaseInstructions { text, provenance } = inherited_base_instructions;
-            provenance.or_else(|| {
-                (text == render_model_instructions(&model_info)).then(|| {
-                    BaseInstructionsProvenance::Model {
-                        model: model_info.slug.clone(),
-                    }
-                })
-            })
         } else {
             Some(BaseInstructionsProvenance::Model {
                 model: model_info.slug.clone(),
@@ -1960,6 +1950,8 @@ impl Session {
                 InitialHistory::Cleared => codex_hooks::SessionStartSource::Clear,
             };
 
+            sess.prepare_resume_instruction_context(&initial_history)
+                .await?;
             // record_initial_history can emit events. We record only after the SessionConfiguredEvent is emitted.
             Box::pin(sess.record_initial_history(initial_history)).await;
             if restore_child_window {

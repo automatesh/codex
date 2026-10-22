@@ -207,3 +207,108 @@ async fn invalid_utf8_is_lossy() {
         )
     );
 }
+
+fn protected_provider(home: &TempDir, accepted: Option<&str>) -> CodexHomeUserInstructionsProvider {
+    use codex_instruction_control::ForkConfig;
+    use codex_instruction_control::PolicySnapshot;
+    use codex_instruction_control::PolicySource;
+    use codex_instruction_control::SourceKind;
+    let mut sources = vec![
+        PolicySource::new(
+            SourceKind::Builtin,
+            "global-agents-home",
+            home.path().to_string_lossy().to_string(),
+        ),
+        PolicySource::new(SourceKind::MainPrompt, "main", "main prompt".to_string()),
+        PolicySource::new(
+            SourceKind::ModelCatalog,
+            "models",
+            r#"{"models":[{"slug":"test","model_messages":{}}]}"#.to_string(),
+        ),
+    ];
+    if let Some(text) = accepted {
+        sources.push(PolicySource::new(
+            SourceKind::Agents,
+            home.path()
+                .join(DEFAULT_AGENTS_MD_FILENAME)
+                .to_string_lossy()
+                .to_string(),
+            text.to_string(),
+        ));
+    }
+    provider(home).with_instruction_snapshot(Some(std::sync::Arc::new(
+        PolicySnapshot::new(ForkConfig::default(), sources).expect("valid approved snapshot"),
+    )))
+}
+
+#[tokio::test]
+async fn approved_global_instructions_survive_edit_and_deletion() {
+    let home = TempDir::new().expect("temp dir");
+    let path = home.path().join(DEFAULT_AGENTS_MD_FILENAME);
+    fs::write(&path, "accepted instructions").expect("write initial source");
+    let provider = protected_provider(&home, Some("accepted instructions"));
+    assert!(provider.load_user_instructions().await.warnings.is_empty());
+    fs::write(&path, "unapproved replacement").expect("edit source");
+    let loaded = provider.load_user_instructions().await;
+    assert_eq!(loaded.instructions.unwrap().text, "accepted instructions");
+    assert_eq!(loaded.warnings.len(), 1);
+    fs::remove_file(&path).expect("delete source");
+    assert_eq!(
+        provider
+            .load_user_instructions()
+            .await
+            .instructions
+            .unwrap()
+            .text,
+        "accepted instructions"
+    );
+}
+
+#[tokio::test]
+async fn new_unapproved_override_cannot_replace_approved_default() {
+    let home = TempDir::new().expect("temp dir");
+    fs::write(home.path().join(DEFAULT_AGENTS_MD_FILENAME), "accepted").expect("write default");
+    fs::write(
+        home.path().join(LOCAL_AGENTS_MD_FILENAME),
+        "unapproved override",
+    )
+    .expect("write override");
+    let loaded = protected_provider(&home, Some("accepted"))
+        .load_user_instructions()
+        .await;
+    assert_eq!(loaded.instructions.unwrap().text, "accepted");
+    assert_eq!(loaded.warnings.len(), 1);
+}
+
+#[tokio::test]
+async fn unapproved_global_source_is_not_loaded() {
+    let home = TempDir::new().expect("temp dir");
+    fs::write(home.path().join(DEFAULT_AGENTS_MD_FILENAME), "not accepted").expect("write source");
+    let loaded = protected_provider(&home, None)
+        .load_user_instructions()
+        .await;
+    assert!(loaded.instructions.is_none());
+    assert_eq!(loaded.warnings.len(), 1);
+}
+
+#[tokio::test]
+async fn changing_live_codex_home_does_not_remove_accepted_global_instructions() {
+    let accepted_home = TempDir::new().unwrap();
+    let live_home = TempDir::new().unwrap();
+    fs::write(
+        accepted_home.path().join(DEFAULT_AGENTS_MD_FILENAME),
+        "accepted global",
+    )
+    .unwrap();
+    fs::write(
+        live_home.path().join(DEFAULT_AGENTS_MD_FILENAME),
+        "different home",
+    )
+    .unwrap();
+    let accepted = protected_provider(&accepted_home, Some("accepted global"));
+    let moved =
+        provider(&live_home).with_instruction_snapshot(accepted.instruction_snapshot.clone());
+    let loaded = moved.load_user_instructions().await;
+    assert_eq!(loaded.instructions.unwrap().text, "accepted global");
+    assert_eq!(moved.codex_home.as_path(), live_home.path());
+}

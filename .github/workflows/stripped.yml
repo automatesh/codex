@@ -32,7 +32,7 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y libcap-dev libssl-dev pkg-config clang
       - name: Check changed crate formatting
-        run: cargo fmt -p codex-analytics -p codex-feedback -p codex-otel -p codex-http-client -p codex-core -p codex-app-server -- --check
+        run: cargo fmt -p codex-analytics -p codex-feedback -p codex-otel -p codex-http-client -p codex-core -p codex-app-server -p codex-cli -p codex-instruction-control -p codex-home -p codex-hooks -p codex-skills-extension -p codex-git-attribution -p codex-config -p codex-history -- --check
       - name: Check full CLI without Guardian or OpenTelemetry
         run: cargo check --locked -p codex-cli
       - name: Test telemetry removal and retained local diagnostics
@@ -50,6 +50,27 @@ jobs:
       - name: Test configuration and metadata boundaries
         if: ${{ !cancelled() }}
         run: cargo test --locked -p codex-core --test stripped_config -- --test-threads=1
+      - name: Test accepted instruction sources and local attribution
+        if: ${{ !cancelled() }}
+        run: cargo test --locked -p codex-instruction-control -p codex-home -p codex-hooks -p codex-skills-extension -p codex-git-attribution -- --test-threads=1
+      - name: Test instruction verification and session reconstruction
+        if: ${{ !cancelled() }}
+        run: |
+          cargo test --locked -p codex-core --lib instruction_policy:: -- --test-threads=1
+          cargo test --locked -p codex-core --lib resume_instructions -- --test-threads=1
+          cargo test --locked -p codex-core --lib instruction_context -- --test-threads=1
+          cargo test --locked -p codex-core --lib config::protected_managed -- --test-threads=1
+          cargo test --locked -p codex-core --lib config::instruction_settings -- --test-threads=1
+          cargo test --locked -p codex-core --lib agents_md_tests:: -- --test-threads=1
+          cargo test --locked -p codex-core --lib exec_policy -- --test-threads=1
+      - name: Test protected backend routing
+        if: ${{ !cancelled() }}
+        run: |
+          cargo test --locked -p codex-cli --bin codex protected_backend_routes -- --test-threads=1
+          cargo test --locked -p codex-tui --lib protected_ -- --test-threads=1
+      - name: Test model independent prefix rules
+        if: ${{ !cancelled() }}
+        run: cargo test --locked -p codex-core --test suite prefix_rules_model_independence -- --test-threads=1
       - name: Build coding and research CLI
         if: ${{ !cancelled() }}
         run: cargo build --locked -p codex-cli --bin codex
@@ -81,7 +102,9 @@ jobs:
         with:
           target: x86_64-pc-windows-msvc
       - name: Build stripped Windows CLI
-        run: cargo build --locked -p codex-cli -p codex-code-mode-host -p codex-responses-api-proxy -p codex-windows-sandbox -p codex-windows-sandbox-service --bin codex --bin codex-code-mode-host --bin codex-responses-api-proxy --bin codex-windows-sandbox-setup --bin codex-windows-sandbox-service --bin codex-command-runner
+        run: cargo build --locked -p codex-cli -p codex-instruction-control -p codex-code-mode-host -p codex-responses-api-proxy -p codex-windows-sandbox -p codex-windows-sandbox-service --bin codex --bin codex-policy-manager --bin codex-code-mode-host --bin codex-responses-api-proxy --bin codex-windows-sandbox-setup --bin codex-windows-sandbox-service --bin codex-command-runner
+      - name: Test protected instruction manager on Windows
+        run: cargo test --locked -p codex-instruction-control -- --test-threads=1
       - name: Verify Windows executable
         run: |
           ./target/debug/codex.exe --version
@@ -96,4 +119,5 @@ jobs:
             codex-rs/target/debug/codex-windows-sandbox-setup.exe
             codex-rs/target/debug/codex-windows-sandbox-service.exe
             codex-rs/target/debug/codex-command-runner.exe
+            codex-rs/target/debug/codex-policy-manager.exe
           if-no-files-found: error

@@ -12,6 +12,7 @@ use codex_config::bundled_skills_enabled_from_stack;
 use codex_config::skill_config_rules_from_stack;
 use codex_exec_server::ExecutorFileSystem;
 use codex_exec_server::LOCAL_FS;
+use codex_instruction_control::PolicySnapshot;
 use codex_protocol::protocol::Product;
 use codex_protocol::protocol::SkillScope;
 use codex_utils_absolute_path::AbsolutePathBuf;
@@ -48,7 +49,8 @@ struct ConfigSkillsCacheEntry {
 #[derive(Debug, Clone)]
 pub struct HostSkillsLoadInput {
     cwd: AbsolutePathBuf,
-    effective_skill_roots: Vec<PluginSkillRoot>,
+    instruction_snapshot: Option<Arc<PolicySnapshot>>,
+    pub(crate) effective_skill_roots: Vec<PluginSkillRoot>,
     config_layer_stack: ConfigLayerStack,
     plugin_skill_snapshots: Option<SkillRootSnapshots<PluginSkillRoot>>,
 }
@@ -61,10 +63,17 @@ impl HostSkillsLoadInput {
     ) -> Self {
         Self {
             cwd,
+            instruction_snapshot: None,
             effective_skill_roots,
             config_layer_stack,
             plugin_skill_snapshots: None,
         }
+    }
+
+    /// Uses only reviewed skill packages and their protected source copies.
+    pub fn with_instruction_snapshot(mut self, snapshot: Option<Arc<PolicySnapshot>>) -> Self {
+        self.instruction_snapshot = snapshot;
+        self
     }
 
     /// Attaches plugin skill snapshots parsed during plugin loading, when available.
@@ -179,6 +188,14 @@ impl HostSkillsService {
         input: &HostSkillsLoadInput,
         fs: Option<Arc<dyn ExecutorFileSystem>>,
     ) -> HostSkillsSnapshot {
+        if let Some(snapshot) = &input.instruction_snapshot {
+            return super::approved_skills::load_approved_skills(
+                snapshot,
+                &input.cwd,
+                &input.config_layer_stack,
+            )
+            .await;
+        }
         let roots = self.skill_roots_for_config(input, fs).await;
         let skill_config_rules = skill_config_rules_from_stack(&input.config_layer_stack);
         let cache_key = config_skills_cache_key(
@@ -244,6 +261,14 @@ impl HostSkillsService {
         fs: Option<Arc<dyn ExecutorFileSystem>>,
         request_root_snapshots: Option<&RequestSkillRootSnapshots>,
     ) -> HostSkillsSnapshot {
+        if let Some(snapshot) = &input.instruction_snapshot {
+            return super::approved_skills::load_approved_skills(
+                snapshot,
+                &input.cwd,
+                &input.config_layer_stack,
+            )
+            .await;
+        }
         let bundled_skills_enabled = bundled_skills_enabled_from_stack(&input.config_layer_stack);
         if bundled_skills_enabled {
             self.ensure_system_skills_installed();

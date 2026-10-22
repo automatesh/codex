@@ -239,6 +239,21 @@ impl ClaudeHooksEngine {
         command_runtime: CommandHookRuntime,
         mcp_executor: Arc<dyn HookMcpExecutor>,
     ) -> Self {
+        if let Some(snapshot) = codex_instruction_control::runtime_snapshot()
+            && let Err(error) = discovery::verify_approved_hook_presence(
+                &snapshot,
+                config_layer_stack,
+                &plugin_hook_sources,
+            )
+        {
+            return Self {
+                handlers: Arc::default(),
+                warnings: vec![error.clone()].into(),
+                required_load_errors: vec![error].into(),
+                command_runtime,
+                mcp_executor,
+            };
+        }
         if !enabled && plugin_hook_sources.is_empty() {
             return Self {
                 handlers: Arc::default(),

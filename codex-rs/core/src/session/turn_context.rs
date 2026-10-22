@@ -6,7 +6,6 @@ use crate::config::TokenBudgetConfig;
 use crate::cyber_access_program;
 use crate::environment_selection::EnvironmentConfigOrigin;
 use crate::environment_selection::TurnEnvironmentSnapshot;
-use crate::exec_policy::AllowPrefixRules;
 use crate::shell_snapshot::ShellSnapshot;
 use crate::shell_snapshot::ShellSnapshotFile;
 use crate::shell_snapshot::ShellSnapshotSandbox;
@@ -26,7 +25,6 @@ use codex_protocol::SessionId;
 use codex_protocol::ThreadId;
 use codex_protocol::config_types::ShellEnvironmentPolicy;
 use codex_protocol::models::AdditionalPermissionProfile;
-use codex_protocol::openai_models::MODEL_SPECIALTY_CYBER;
 use codex_protocol::openai_models::ModelInfo;
 use codex_protocol::permissions::RawFileSystemSandboxPolicy;
 use codex_protocol::protocol::EnvironmentConfig;
@@ -656,26 +654,6 @@ impl TurnContext {
     /// Step-scoped consumers should use their captured `StepContext::settings`.
     pub(crate) fn approval_policy(&self) -> AskForApproval {
         self.config.permissions.approval_policy.value()
-    }
-
-    /// Legacy: returns the frozen initial-turn prefix-rule policy.
-    /// Step-scoped consumers should use their captured `StepContext::settings`.
-    pub(crate) fn allow_prefix_rules(&self) -> AllowPrefixRules {
-        let ignore_rules = self
-            .config
-            .config_layer_stack
-            .requirements_toml()
-            .auto_review
-            .as_ref()
-            .and_then(|auto_review| auto_review.ignore_rules.as_ref())
-            .is_some_and(|models| models.contains(&self.model_info().slug));
-        if self.model_info().model_specialty.as_deref() == Some(MODEL_SPECIALTY_CYBER)
-            || ignore_rules
-        {
-            AllowPrefixRules::IgnoreForCyberModel
-        } else {
-            AllowPrefixRules::Honor
-        }
     }
 
     pub(crate) async fn plugin_metrics_operation_for_command(

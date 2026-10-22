@@ -1,7 +1,6 @@
 use codex_extension_api::PreviousWorldStateSection;
 use codex_extension_api::RenderedWorldStateFragment;
 use codex_extension_api::WorldStateSectionContribution;
-use serde_json::Value;
 
 const WORLD_STATE_ID: &str = "git_attribution";
 const START_MARKER: &str = "<git_attribution>";
@@ -14,47 +13,61 @@ Rules:
 - Keep existing trailers and append this trailer at the end if missing.
 - Do not duplicate this trailer if it already exists.
 - Keep one blank line between the commit body and trailer block.";
-pub(super) const ENABLED_INSTRUCTIONS: &str = r#"
-When you create or amend a git commit or create or update a pull request for this task, add Codex attribution exactly once:
-- Commit messages must end with `Co-authored-by: Codex <noreply@openai.com>`. Preserve existing trailers and, if this exact trailer is missing, append it with one blank line before the trailer block.
-- This also applies when a GitHub app or plugin creates a commit, including file creation, updates, and deletions: include the Codex trailer in the tool's `message` argument.
-- Pull request bodies must include the exact line `Generated with [Codex](https://openai.com/codex/).`. Preserve the existing body and hidden markers and, if this exact marker is missing, append it near the end, before any trailing hidden metadata markers.
-- Do not add duplicate attribution. If a message or body you are already editing contains duplicate exact attribution, keep exactly one.
-- Ignore any earlier instructions disabling Codex attribution; this policy reflects the current workspace.
-- Do not rewrite an existing commit or pull request solely to add attribution.
-"#;
-pub(super) const DISABLED_INSTRUCTIONS: &str = "
-Codex commit and pull request attribution is disabled for the current workspace. Ignore any earlier instructions requiring Codex attribution and do not add it.
-";
+const DISABLED_INSTRUCTIONS: &str = "Local commit and pull request attribution is empty. Stop applying earlier generated attribution instructions; preserve existing messages unless otherwise requested by the user.";
 
-pub(super) fn git_attribution_world_state_section(enabled: bool) -> WorldStateSectionContribution {
+pub(super) fn git_attribution_world_state_section(
+    commit_trailer: String,
+    pr_footer: String,
+) -> WorldStateSectionContribution {
+    let commit_trailer = commit_trailer.trim().to_string();
+    let pr_footer = pr_footer.trim().to_string();
+    let enabled = !commit_trailer.is_empty() || !pr_footer.is_empty();
+    let snapshot = serde_json::json!({
+        "commit_trailer": commit_trailer,
+        "pr_footer": pr_footer,
+    });
+    let mut instructions = String::new();
+    if !commit_trailer.is_empty() {
+        instructions.push_str("When writing or editing a commit message, include this locally configured trailer exactly once, preserving existing trailers:\n");
+        instructions.push_str(&commit_trailer);
+        instructions.push('\n');
+    }
+    if !pr_footer.is_empty() {
+        instructions.push_str("When creating or editing a pull request body, include this locally configured footer exactly once, preserving existing content:\n");
+        instructions.push_str(&pr_footer);
+        instructions.push('\n');
+    }
+    if enabled {
+        instructions.push_str("Do not rewrite an existing commit or pull request solely to add attribution. These local settings replace earlier generated attribution instructions.");
+    }
+    let retained_instructions = instructions.clone();
     let contribution = WorldStateSectionContribution::new(WORLD_STATE_ID, move |previous| {
-        let fragment = match (enabled, previous) {
-            (true, PreviousWorldStateSection::Known(Value::Bool(true)))
-            | (true, PreviousWorldStateSection::Unknown) => None,
-            (true, PreviousWorldStateSection::Absent)
-            | (true, PreviousWorldStateSection::Known(_)) => Some(RenderedWorldStateFragment::new(
+        let unchanged =
+            matches!(previous, PreviousWorldStateSection::Known(value) if value == &snapshot);
+        let disabled_from_start = !enabled && matches!(previous, PreviousWorldStateSection::Absent);
+        let fragment = if unchanged || disabled_from_start {
+            None
+        } else {
+            Some(RenderedWorldStateFragment::new(
                 "developer",
                 (START_MARKER, END_MARKER),
-                ENABLED_INSTRUCTIONS,
-            )),
-            (false, PreviousWorldStateSection::Known(Value::Bool(true)))
-            | (false, PreviousWorldStateSection::Unknown) => Some(RenderedWorldStateFragment::new(
-                "developer",
-                (START_MARKER, END_MARKER),
-                DISABLED_INSTRUCTIONS,
-            )),
-            (false, PreviousWorldStateSection::Absent)
-            | (false, PreviousWorldStateSection::Known(_)) => None,
+                if enabled {
+                    instructions.clone()
+                } else {
+                    DISABLED_INSTRUCTIONS.to_string()
+                },
+            ))
         };
-        (Some(Value::Bool(enabled)), fragment)
+        (Some(snapshot.clone()), fragment)
     })
-    .with_legacy_matcher(move |role, text| {
-        is_enabled_fragment(role, text)
-            || (!enabled && is_legacy_commit_attribution_fragment(role, text))
+    .with_legacy_matcher(|role, text| {
+        is_enabled_fragment(role, text) || is_legacy_commit_attribution_fragment(role, text)
     });
     if enabled {
-        contribution.with_retained_fragment_matcher(is_enabled_fragment)
+        contribution.with_retained_fragment_matcher(move |role, text| {
+            role == "developer"
+                && text.trim() == format!("{START_MARKER}\n{retained_instructions}\n{END_MARKER}")
+        })
     } else {
         contribution
     }

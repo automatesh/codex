@@ -87,6 +87,12 @@ pub(crate) fn attribute_executor_plugins(
 impl SkillProvider for ExecutorSkillProvider {
     fn list(&self, query: SkillListQuery) -> SkillProviderFuture<'_, SkillCatalog> {
         Box::pin(async move {
+            if codex_instruction_control::runtime_snapshot().is_some() {
+                return Ok(SkillCatalog {
+                    entries: Vec::new(),
+                    warnings: vec!["Live executor skill discovery is pending instruction-source approval. Accepted skill packages remain available from their protected copies; remote execution tools are unchanged.".to_string()],
+                });
+            }
             if let Some(discovery) = query.executor_capability_discovery {
                 return Ok(self.list_from_discovery(&discovery));
             }
@@ -146,6 +152,29 @@ impl SkillProvider for ExecutorSkillProvider {
         request: SkillReadRequest<'a>,
     ) -> SkillProviderFuture<'a, SkillReadResult> {
         Box::pin(async move {
+            if let Some(snapshot) = codex_instruction_control::runtime_snapshot() {
+                let id = request.resource.as_str();
+                let accepted = snapshot.sources.iter().find(|source| {
+                    matches!(source.kind, codex_instruction_control::SourceKind::Skill | codex_instruction_control::SourceKind::SkillAsset)
+                        && source.logical_id == id
+                }).ok_or_else(|| SkillProviderError::new(format!(
+                    "Executor skill source {id} is not in the accepted snapshot; prepare and approve a candidate before reading it."
+                )))?;
+                return Ok(SkillReadResult {
+                    resource: request.resource.clone(),
+                    contents: String::from_utf8(
+                        accepted
+                            .bytes()
+                            .map_err(|error| SkillProviderError::new(error.to_string()))?
+                            .into_owned(),
+                    )
+                    .map_err(|_| {
+                        SkillProviderError::new(
+                            "Accepted skill resource is binary, not instruction text",
+                        )
+                    })?,
+                });
+            }
             if request.authority.kind != SkillSourceKind::Executor {
                 return Err(SkillProviderError::new(format!(
                     "executor skill provider cannot read {} resources",

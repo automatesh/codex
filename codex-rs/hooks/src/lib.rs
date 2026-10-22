@@ -16,6 +16,7 @@ pub use declarations::PluginHookDeclaration;
 pub use declarations::plugin_hook_declarations;
 pub use engine::HookListEntry;
 pub use engine::HookListEntryHandler;
+pub use engine::discovery::capture_hook_sources;
 pub use engine::dispatcher::hook_execution_mode_label;
 pub use engine::dispatcher::hook_handler_type_label;
 pub use events::common::SubagentHookContext;

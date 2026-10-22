@@ -2532,8 +2532,10 @@ dependencies = [
  "codex-git-utils",
  "codex-history",
  "codex-home",
+ "codex-hooks",
  "codex-http-client",
  "codex-install-context",
+ "codex-instruction-control",
  "codex-login",
  "codex-mcp",
  "codex-memories-write",
@@ -2822,6 +2824,7 @@ dependencies = [
  "codex-features",
  "codex-file-system",
  "codex-git-utils",
+ "codex-instruction-control",
  "codex-model-provider-info",
  "codex-network-proxy",
  "codex-protocol",
@@ -2962,6 +2965,7 @@ dependencies = [
  "codex-http-client",
  "codex-image-generation-extension",
  "codex-install-context",
+ "codex-instruction-control",
  "codex-login",
  "codex-mcp",
  "codex-mcp-extension",
@@ -3476,13 +3480,8 @@ dependencies = [
 name = "codex-git-attribution"
 version = "0.163.0"
 dependencies = [
- "codex-backend-client",
  "codex-extension-api",
- "codex-http-client",
- "codex-login",
  "serde_json",
- "tokio",
- "wiremock",
 ]
 
 [[package]]
@@ -3592,6 +3591,7 @@ name = "codex-home"
 version = "0.163.0"
 dependencies = [
  "codex-extension-api",
+ "codex-instruction-control",
  "codex-utils-absolute-path",
  "pretty_assertions",
  "tempfile",
@@ -3607,6 +3607,7 @@ dependencies = [
  "async-channel",
  "chrono",
  "codex-config",
+ "codex-instruction-control",
  "codex-plugin",
  "codex-protocol",
  "codex-utils-absolute-path",
@@ -3699,6 +3700,21 @@ dependencies = [
  "serde",
  "serde_json",
  "tempfile",
+]
+
+[[package]]
+name = "codex-instruction-control"
+version = "0.163.0"
+dependencies = [
+ "anyhow",
+ "base64 0.22.1",
+ "clap",
+ "schemars 0.8.22",
+ "serde",
+ "serde_json",
+ "sha2 0.10.9",
+ "tempfile",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -4517,6 +4533,7 @@ dependencies = [
  "codex-config",
  "codex-exec-server",
  "codex-extension-api",
+ "codex-instruction-control",
  "codex-mcp",
  "codex-models-manager",
  "codex-otel",
@@ -4718,6 +4735,7 @@ dependencies = [
  "codex-history",
  "codex-http-client",
  "codex-install-context",
+ "codex-instruction-control",
  "codex-login",
  "codex-mcp",
  "codex-mermaid",

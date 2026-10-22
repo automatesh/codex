@@ -991,14 +991,8 @@ async fn delayed_activation_rechecks_live_managed_authorization(
     session.abort_all_tasks(TurnAbortReason::Replaced).await;
 }
 
-#[derive(Clone, Copy)]
-enum ManagedPolicyChange {
-    IgnorePrefixRules,
-}
-
-#[test_case(ManagedPolicyChange::IgnorePrefixRules; "prefix rule policy changed since admission")]
 #[tokio::test]
-async fn activation_must_match_the_retained_turn_authority(change: ManagedPolicyChange) {
+async fn specialty_and_legacy_ignore_rules_do_not_change_prefix_authority() {
     let (mut session, mut turn) = make_session_and_context().await;
     let config = Arc::make_mut(&mut turn.config);
     config.approvals_reviewer = ApprovalsReviewer::User;
@@ -1030,6 +1024,7 @@ async fn activation_must_match_the_retained_turn_authority(change: ManagedPolicy
     let current = &prepared.initial_settings;
     let mut model_info = current.model_info.as_ref().clone();
     model_info.slug = "step-settings-policy-destination".to_string();
+    model_info.model_specialty = Some("cyber".to_string());
     let mut selected = current.selected().clone();
     selected.collaboration_mode.settings.model = model_info.slug.clone();
     let destination =
@@ -1055,19 +1050,14 @@ async fn activation_must_match_the_retained_turn_authority(change: ManagedPolicy
         Ok(())
     );
 
-    // Both model names acquire the same live classification. Comparing only
-    // those names in the latest requirements would therefore accept the switch,
-    // even though remaining consumers still use the admitted turn's authority.
     let models = vec![
         current.model_info.slug.clone(),
         destination.model_info.slug.clone(),
     ];
     let requirements = ConfigRequirements::default();
-    let auto_review = match change {
-        ManagedPolicyChange::IgnorePrefixRules => AutoReviewRequirementsToml {
-            ignore_rules: Some(models),
-            ..Default::default()
-        },
+    let auto_review = AutoReviewRequirementsToml {
+        ignore_rules: Some(models),
+        ..Default::default()
     };
     let config = Arc::make_mut(&mut live.original_config_do_not_use);
     config.config_layer_stack = ConfigLayerStack::new(
@@ -1083,8 +1073,6 @@ async fn activation_must_match_the_retained_turn_authority(change: ManagedPolicy
         },
     )
     .expect("build refreshed requirements");
-    // The destination satisfies today's managed policy. Only the temporary
-    // compatibility check rejects the mismatch with retained turn consumers.
     assert_eq!(
         session.validate_active_step_settings(
             &prepared,
@@ -1101,11 +1089,7 @@ async fn activation_must_match_the_retained_turn_authority(change: ManagedPolicy
             &destination,
             &live.original_config_do_not_use,
         ),
-        Err(match change {
-            ManagedPolicyChange::IgnorePrefixRules => {
-                "the destination changes the admitted prefix-rule policy".to_string()
-            }
-        })
+        Ok(())
     );
 }
 

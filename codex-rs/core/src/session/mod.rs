@@ -261,6 +261,7 @@ mod mcp_runtime;
 pub(crate) mod multi_agents;
 mod plugin_selection;
 mod realtime_history;
+mod resume_instructions;
 mod retained_context;
 mod review;
 mod rollout_budget;
@@ -460,6 +461,7 @@ pub(crate) struct CompactionPrefix {
 pub(crate) enum CompactedHistoryInstallation<'a> {
     Complete(CompactedHistoryMetadata),
     Prefix {
+        instruction_snapshot_id: Option<String>,
         prefix: CompactionPrefix,
         prefix_context: Vec<ResponseItem>,
         initial_context: Vec<ResponseItemEnvelope>,
@@ -531,21 +533,10 @@ pub(crate) struct SessionSpawnArgs {
 }
 
 pub(crate) fn resolve_multi_agent_version(
-    conversation_history: &InitialHistory,
+    _conversation_history: &InitialHistory,
     inherited_multi_agent_version: Option<MultiAgentVersion>,
 ) -> Option<MultiAgentVersion> {
-    if inherited_multi_agent_version == Some(MultiAgentVersion::Disabled) {
-        return Some(MultiAgentVersion::Disabled);
-    }
-
-    conversation_history
-        .get_multi_agent_version()
-        .or(inherited_multi_agent_version)
-        .or(match conversation_history {
-            InitialHistory::New | InitialHistory::Cleared => None,
-            // Threads created before runtime metadata existed keep the legacy V1 tool surface.
-            InitialHistory::Resumed(_) | InitialHistory::Forked(_) => Some(MultiAgentVersion::V1),
-        })
+    inherited_multi_agent_version
 }
 
 pub(crate) const INITIAL_SUBMIT_ID: &str = "";
@@ -772,10 +763,8 @@ impl Session {
             );
         }
 
-        // Resolve base instructions for the session. Priority order:
-        // 1. config.base_instructions override
-        // 2. conversation history => session_meta.base_instructions
-        // 3. rendered instructions_template for current model
+        // Saved instructions remain archival data. A resumed runtime uses the current
+        // accepted configuration and model catalog, just like a fresh runtime.
         let model_info = models_manager
             .get_model_info(model.as_str(), &config.to_models_manager_config())
             .await;
@@ -797,16 +786,18 @@ impl Session {
             token_budget::apply_model_defaults(Arc::make_mut(&mut config), &model_info);
         }
         let configured_config = Arc::clone(&config);
-        let multi_agent_version = config.multi_agent_version_override().or_else(|| {
-            resolve_multi_agent_version(&conversation_history, inherited_multi_agent_version)
-        });
+        let multi_agent_version = config
+            .multi_agent_version_override()
+            .or(model_info.multi_agent_version)
+            .or_else(|| {
+                resolve_multi_agent_version(&conversation_history, inherited_multi_agent_version)
+            });
         let history_mode = conversation_history.get_history_mode(
             requested_history_mode.unwrap_or_else(|| thread_store.default_history_mode()),
         );
         let base_instructions = config
             .base_instructions
             .clone()
-            .or_else(|| conversation_history.get_base_instructions().map(|s| s.text))
             .unwrap_or_else(|| render_model_instructions(&model_info));
 
         // Dynamic tools are defined at thread start and persisted in rollout session metadata.
@@ -870,10 +861,11 @@ impl Session {
             },
         };
         let collaboration_mode = persisted_collaboration_mode.map_or(collaboration_mode, |saved| {
-            saved.with_updates(
-                Some(model.clone()),
-                Some(config.model_reasoning_effort.clone()),
-                /*developer_instructions*/ None,
+            resume_instructions::rebuild_collaboration_mode(
+                saved,
+                model.clone(),
+                config.model_reasoning_effort.clone(),
+                codex_prompts::ResolvedModelMessages::from_model(&model_info).collaboration_modes(),
             )
         });
         let initial_service_tier_warning = unsupported_service_tier_warning(
@@ -1790,21 +1782,60 @@ impl Session {
         turn_context: &Arc<TurnContext>,
         rollout_items: &[RolloutItem],
     ) -> Option<PreviousTurnSettings> {
+        let instruction_context = self
+            .services
+            .session_extension_data
+            .get::<resume_instructions::ResumeInstructionContext>();
+        self.apply_instruction_reconstruction(
+            turn_context,
+            instruction_context
+                .as_ref()
+                .and_then(|context| context.full_history.as_deref())
+                .map(Vec::as_slice)
+                .unwrap_or(rollout_items),
+            instruction_context
+                .as_ref()
+                .and_then(|context| context.fingerprint.as_deref()),
+            instruction_context
+                .as_ref()
+                .map_or(turn_context.history_mode, |context| context.history_mode),
+            None,
+        )
+        .await
+        .expect("resume instruction history must be validated before the runtime starts")
+    }
+
+    async fn apply_instruction_reconstruction(
+        &self,
+        turn_context: &Arc<TurnContext>,
+        rollout_items: &[RolloutItem],
+        instruction_context_id: Option<&str>,
+        source_history_mode: ThreadHistoryMode,
+        expected_history: Option<(u64, usize)>,
+    ) -> CodexResult<Option<PreviousTurnSettings>> {
+        let rebuilt = resume_instructions::rebuild_instruction_history(
+            rollout_items,
+            source_history_mode,
+            instruction_context_id,
+            codex_prompts::ResolvedModelMessages::from_model(turn_context.model_info())
+                .content_filter_guidance(),
+        )
+        .map_err(CodexErr::InvalidRequest)?;
         let rollout_reconstruction::RolloutReconstruction {
             mut history,
             retained_context,
             guardian_history,
             last_started_turn_id,
             previous_turn_settings,
-            reference_context_item,
+            reference_context_item: _,
             turn_attribution,
-            world_state_baseline,
+            world_state_baseline: _,
             window_number,
             first_window_id,
             previous_window_id,
             window_id,
         } = self
-            .reconstruct_history_from_rollout(turn_context, rollout_items)
+            .reconstruct_history_from_rollout(turn_context, &rebuilt.items)
             .await;
         // Keep the recorded rollout unchanged. Prepare its reconstructed history before
         // installing it, so legacy media is processed once for this resume or fork and
@@ -1840,11 +1871,16 @@ impl Session {
             .collect();
         {
             let mut state = self.state.lock().await;
-            state.replace_annotated_history(
-                history,
-                reference_context_item,
-                HistoryReplacement::Reset,
-            );
+            if expected_history.is_some_and(|(generation, len)| {
+                state.history.history_version() != generation
+                    || state.history.annotated_items().len() != len
+            }) {
+                return Err(CodexErr::InvalidRequest(
+                    "History changed while rebuilding its instruction context. No stale context was sent; retry after pending tool results are recorded."
+                        .to_owned(),
+                ));
+            }
+            state.replace_annotated_history(history, None, HistoryReplacement::Reset);
             state.history.restore_review_context(
                 Some(&retained_context),
                 guardian_history.as_ref(),
@@ -1852,9 +1888,6 @@ impl Session {
             );
             state.last_started_turn_id = last_started_turn_id;
             state.turn_attribution = turn_attribution;
-            if let Some(world_state) = world_state_baseline {
-                state.history.set_world_state_baseline(world_state);
-            }
             let fallback_ids = state.auto_compact_window_ids();
             let window_id = window_id.unwrap_or(fallback_ids.window_id);
             state.restore_auto_compact_window(
@@ -1881,7 +1914,7 @@ impl Session {
             self.set_auto_compact_window_estimated_prefill_for_scope(turn_context, prefix_tokens)
                 .await;
         }
-        previous_turn_settings
+        Ok(previous_turn_settings)
     }
 
     async fn set_auto_compact_window_estimated_prefill_for_scope(
@@ -3730,6 +3763,14 @@ impl Session {
         let world_state = self
             .build_world_state_for_step(step_context, /*new_window*/ false)
             .await?;
+        if self
+            .rebuild_stale_compaction_context(step_context, &world_state)
+            .await?
+        {
+            return self
+                .record_context_updates_and_set_reference_context_item(step_context)
+                .await;
+        }
         let (world_state_snapshot, fragments, world_state_item) = self
             .state
             .lock()
@@ -4165,11 +4206,33 @@ impl Session {
         let _settings_guard = thread_settings::acquire_persistence_lock(self).await;
         let (compacted_item, started_item) = {
             let mut state = self.state.lock().await;
+            let source_instruction_snapshot_id = match &installation {
+                CompactedHistoryInstallation::Complete(metadata) => {
+                    metadata.instruction_snapshot_id.as_deref()
+                }
+                CompactedHistoryInstallation::Prefix {
+                    instruction_snapshot_id,
+                    ..
+                } => instruction_snapshot_id.as_deref(),
+            };
+            let current_instruction_snapshot_id = state
+                .session_configuration
+                .original_config_do_not_use
+                .instruction_snapshot
+                .as_ref()
+                .map(|snapshot| snapshot.snapshot_id.as_str());
+            if !resume_instructions::context_key_matches_policy(
+                source_instruction_snapshot_id,
+                current_instruction_snapshot_id,
+            ) {
+                return false;
+            }
             let complete_replacement =
                 matches!(&installation, CompactedHistoryInstallation::Complete(_));
             let (metadata, started_item) = match installation {
                 CompactedHistoryInstallation::Complete(metadata) => (metadata, None),
                 CompactedHistoryInstallation::Prefix {
+                    instruction_snapshot_id,
                     prefix,
                     prefix_context,
                     initial_context,
@@ -4214,6 +4277,7 @@ impl Session {
                     let (window_number, window_ids) = state.advance_auto_compact_window();
                     (
                         CompactedHistoryMetadata {
+                            instruction_snapshot_id,
                             input_goal_ids,
                             message: String::new(),
                             window_number,
@@ -4249,6 +4313,12 @@ impl Session {
                         })
                         .cloned(),
                 );
+            }
+            for envelope in &mut items {
+                envelope
+                    .metadata
+                    .get_or_insert_default()
+                    .instruction_snapshot_id = metadata.instruction_snapshot_id.clone();
             }
             let replacement_history = items.clone();
             state.replace_annotated_history(
@@ -4781,11 +4851,15 @@ impl Session {
                 .chain(retained_client_items)
                 .collect();
         let turn_context_item = step_context.to_turn_context_item();
+        let instruction_snapshot_id = self
+            .instruction_context_fingerprint(step_context, world_state.as_ref())
+            .await;
         self.replace_compacted_history(
             context_items,
             turn_context_item,
             world_state_snapshot,
             CompactedHistoryMetadata {
+                instruction_snapshot_id,
                 input_goal_ids,
                 message: String::new(),
                 window_number,
@@ -4828,11 +4902,19 @@ impl Session {
             state.reference_context_item()
         };
         let turn_context_item = step_context.to_turn_context_item();
-        let turn_context_changed = reference_context_item.as_ref() != Some(&turn_context_item);
-        let should_inject_full_context = reference_context_item.is_none();
-        let world_state = self
+        let mut turn_context_changed = reference_context_item.as_ref() != Some(&turn_context_item);
+        let mut should_inject_full_context = reference_context_item.is_none();
+        let mut world_state = self
             .build_world_state_for_step(step_context, should_inject_full_context)
             .await?;
+        if self
+            .rebuild_stale_compaction_context(step_context, &world_state)
+            .await?
+        {
+            turn_context_changed = true;
+            should_inject_full_context = true;
+            world_state = self.build_world_state_for_step(step_context, true).await?;
+        }
         // Full initial context resets the baseline; later turns persist only its changes.
         let (mut context_items, world_state_item) = if should_inject_full_context {
             let (context_updates, snapshot) = self

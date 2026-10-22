@@ -71,6 +71,7 @@ pub struct AutoCompactionDisabled;
 /// `Session::replace_compacted_history` assigns missing item IDs before constructing the persisted
 /// `CompactedItem`, ensuring the live and persisted histories remain identical.
 pub(crate) struct CompactedHistoryMetadata {
+    pub(crate) instruction_snapshot_id: Option<String>,
     pub(crate) input_goal_ids: HashSet<ResponseItemId>,
     pub(crate) message: String,
     pub(crate) window_number: u64,
@@ -268,15 +269,45 @@ async fn run_compact_task_inner_impl(
     world_state: Arc<WorldState>,
     compaction_metadata: CompactionTurnMetadata,
 ) -> CodexResult<String> {
+    if sess
+        .rebuild_stale_compaction_context(&replacement_step_context, &world_state)
+        .await?
+    {
+        sess.record_context_updates_and_set_reference_context_item(&replacement_step_context)
+            .await?;
+    }
+    if turn_context.model_info().slug != replacement_step_context.settings.model_info.slug {
+        return Err(CodexErr::InvalidRequest(
+            "Compaction cannot adopt a different model's instruction context. Rebuild from the original history first."
+                .to_owned(),
+        ));
+    }
+    let instruction_snapshot_id = sess
+        .instruction_context_fingerprint(&replacement_step_context, &world_state)
+        .await;
     let compaction_item = TurnItem::ContextCompaction(ContextCompactionItem::new());
     sess.emit_turn_item_started(&turn_context, &compaction_item)
         .await;
     let initial_input_for_turn: ResponseInputItem = ResponseInputItem::from(input);
+    let mut initial_input_for_turn: ResponseItem = initial_input_for_turn.into();
+    if let ResponseItem::Message {
+        content,
+        internal_chat_message_metadata_passthrough,
+        ..
+    } = &mut initial_input_for_turn
+    {
+        internal_chat_message_metadata_passthrough
+            .get_or_insert_default()
+            .content_item_kinds = Some(vec![
+            ContentItemKind("compaction.instructions".to_owned());
+            content.len()
+        ]);
+    }
 
     let mut history = sess.clone_history().await;
     let input_goal_ids = UserGoalUpdate::message_ids(history.raw_items());
     history.record_items(
-        &[initial_input_for_turn.into()],
+        &[initial_input_for_turn],
         turn_context.model_info().truncation_policy.into(),
     );
 
@@ -408,21 +439,38 @@ async fn run_compact_task_inner_impl(
         new_history,
     )
     .await;
-    sess.replace_compacted_history(
-        new_history,
-        replacement_step_context.to_turn_context_item(),
-        world_state_baseline,
-        CompactedHistoryMetadata {
-            input_goal_ids,
-            message: summary_text,
-            window_number,
-            window_ids,
-            compaction_response_id: Some(compaction_response.response_id),
-            compaction_model_hash: turn_context.model_info().comp_hash.clone(),
-            reviewer_compaction_hash: None,
-        },
-    )
-    .await;
+    let current_instruction_snapshot_id = sess
+        .instruction_context_fingerprint(&replacement_step_context, &world_state)
+        .await;
+    if instruction_snapshot_id != current_instruction_snapshot_id {
+        return Err(CodexErr::InvalidRequest(
+            "The effective instruction context changed during compaction; no replacement was installed."
+                .to_owned(),
+        ));
+    }
+    let installed = sess
+        .replace_compacted_history(
+            new_history,
+            replacement_step_context.to_turn_context_item(),
+            world_state_baseline,
+            CompactedHistoryMetadata {
+                instruction_snapshot_id,
+                input_goal_ids,
+                message: summary_text,
+                window_number,
+                window_ids,
+                compaction_response_id: Some(compaction_response.response_id),
+                compaction_model_hash: turn_context.model_info().comp_hash.clone(),
+                reviewer_compaction_hash: None,
+            },
+        )
+        .await;
+    if !installed {
+        return Err(CodexErr::InvalidRequest(
+            "The accepted instruction snapshot changed during compaction; no replacement was installed."
+                .to_owned(),
+        ));
+    }
     sess.recompute_token_usage(&replacement_step_context.turn)
         .await;
 
@@ -796,6 +844,7 @@ async fn drain_to_completed(
     prompt: &Prompt,
     phase: CompactionPhase,
 ) -> CodexResult<CompactionResponse> {
+    crate::instruction_policy::verify_prompt(&turn_context.config, prompt)?;
     let mut stream = client_session
         .stream(
             prompt,

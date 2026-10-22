@@ -162,6 +162,7 @@ use toml_edit::DocumentMut;
 
 mod auth_keyring;
 pub mod edit;
+mod instruction_settings;
 mod managed_features;
 mod metrics;
 mod network_config;
@@ -171,6 +172,10 @@ mod permission_path;
 mod permission_profile_catalog;
 mod permission_profile_selection;
 mod permissions;
+mod protected_managed;
+pub use instruction_settings::capture_instruction_settings;
+pub use protected_managed::capture_cloud_managed_sources;
+pub use protected_managed::capture_managed_instruction_sources;
 mod requirements;
 mod resolved_permission_profile;
 mod runtime_refresh;
@@ -705,6 +710,10 @@ pub struct Config {
     /// Base instructions override.
     pub base_instructions: Option<String>,
 
+    pub fork: codex_instruction_control::ForkConfig,
+
+    pub instruction_snapshot: Option<Arc<codex_instruction_control::PolicySnapshot>>,
+
     /// Origin of the configured base instructions when supplied by another session or lockfile.
     pub base_instructions_provenance: Option<BaseInstructionsProvenance>,
 
@@ -1230,7 +1239,8 @@ const TOKEN_BUDGET_REMINDER_MESSAGE_TEMPLATE_MAX_BYTES: usize = 2000;
 const TOKEN_BUDGET_GUIDANCE_MESSAGE_MAX_BYTES: usize = 2000;
 const AUTO_COMPACT_FALLBACK_PROMPT_MAX_BYTES: usize = 2000;
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct TokenBudgetConfig {
     pub use_history_notes_extension: bool,
     pub reminder_threshold_tokens: Option<i64>,
@@ -1565,8 +1575,25 @@ impl ConfigBuilder {
             None => AbsolutePathBuf::current_dir()?,
         };
         harness_overrides.cwd = Some(cwd.to_path_buf());
+        let pinned_managed = match codex_instruction_control::runtime_snapshot() {
+            Some(snapshot) => Some(
+                protected_managed::prepare(
+                    &snapshot,
+                    codex_home.as_path(),
+                    loader_overrides.clone(),
+                    cloud_config_bundle.clone(),
+                )
+                .await?,
+            ),
+            None => None,
+        };
+        let (managed_fs, loader_overrides, cloud_config_bundle): (&dyn ExecutorFileSystem, _, _) =
+            match pinned_managed.as_ref() {
+                Some((fs, overrides, bundle)) => (fs, overrides.clone(), bundle.clone()),
+                None => (LOCAL_FS.as_ref(), loader_overrides, cloud_config_bundle),
+            };
         let config_layer_stack = load_config_layers_state(
-            LOCAL_FS.as_ref(),
+            managed_fs,
             &codex_home,
             (!without_project_context).then_some(cwd),
             &cli_overrides,
@@ -3298,6 +3325,19 @@ impl Config {
     ) -> std::io::Result<Self> {
         // Keep the large config-construction future off small test thread stacks.
         Box::pin(async move {
+        let instruction_snapshot = codex_instruction_control::runtime_snapshot();
+        if let Some(snapshot) = &instruction_snapshot {
+            cfg.fork = snapshot.config.clone();
+            cfg.instructions = Some(snapshot.single(codex_instruction_control::SourceKind::MainPrompt)
+                .map_err(std::io::Error::other)?.to_owned());
+            cfg.model_instructions_file = None;
+            cfg.experimental_compact_prompt_file = None;
+            cfg.model_catalog_json = None;
+            let developer = snapshot.sources.iter()
+                .filter(|source| source.kind == codex_instruction_control::SourceKind::DeveloperInstructions)
+                .map(|source| source.content.as_str()).collect::<Vec<_>>().join("\n\n");
+            cfg.developer_instructions = (!developer.is_empty()).then_some(developer);
+        }
         if cfg.experimental_thread_store_endpoint.is_some() {
             return Err(std::io::Error::new(
                 std::io::ErrorKind::InvalidInput,
@@ -3338,7 +3378,7 @@ impl Config {
                 .as_ref(),
         )?;
         let orchestrator = cfg.orchestrator.as_ref();
-        let cloud_skill_enabled = cfg
+        let cloud_skill_enabled = instruction_snapshot.is_none() && cfg
             .cloud
             .as_ref()
             .and_then(|cloud| cloud.skills.as_ref())
@@ -4125,13 +4165,18 @@ impl Config {
             "model instructions file",
         )
         .await?;
-        let base_instructions = base_instructions
+        let base_instructions = if let Some(snapshot) = &instruction_snapshot {
+            Some(snapshot.single(codex_instruction_control::SourceKind::MainPrompt)
+                .map_err(std::io::Error::other)?.to_owned())
+        } else { base_instructions
             .or(file_base_instructions)
-            .or(cfg.instructions.clone());
+            .or(cfg.instructions.clone()) };
         let base_instructions_provenance = base_instructions
             .as_ref()
             .map(|_| BaseInstructionsProvenance::Custom);
-        let developer_instructions = developer_instructions.or(cfg.developer_instructions);
+        let developer_instructions = if instruction_snapshot.is_some() {
+            cfg.developer_instructions
+        } else { developer_instructions.or(cfg.developer_instructions) };
         let include_permissions_instructions = cfg.include_permissions_instructions.unwrap_or(true);
         let include_apps_instructions = cfg.include_apps_instructions.unwrap_or(true);
         let include_collaboration_mode_instructions =
@@ -4206,7 +4251,10 @@ impl Config {
         let review_model = override_review_model.or(cfg.review_model);
 
         let check_for_update_on_startup = cfg.check_for_update_on_startup.unwrap_or(true);
-        let model_catalog = load_model_catalog(cfg.model_catalog_json.clone())?;
+        let model_catalog = if let Some(snapshot) = &instruction_snapshot {
+            Some(serde_json::from_str(snapshot.single(codex_instruction_control::SourceKind::ModelCatalog)
+                .map_err(std::io::Error::other)?).map_err(std::io::Error::other)?)
+        } else { load_model_catalog(cfg.model_catalog_json.clone())? };
 
         let log_dir = cfg
             .log_dir
@@ -4449,6 +4497,8 @@ impl Config {
             notify: cfg.notify,
             base_instructions,
             base_instructions_provenance,
+            fork: cfg.fork,
+            instruction_snapshot,
             personality,
             developer_instructions,
             compact_prompt,
@@ -4709,6 +4759,7 @@ impl Config {
                 .unwrap_or_default(),
             otel,
         };
+        instruction_settings::apply_instruction_settings(&mut config)?;
         if let Some(message) = config.credential_masking_warning(config.permissions.permission_profile()) {
             tracing::warn!("{message}");
             config.startup_warnings.push(message.to_string());

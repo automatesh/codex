@@ -1798,3 +1798,50 @@ fn create_skill(codex_home: PathBuf, name: &str, description: &str) {
     let content = format!("---\nname: {name}\ndescription: {description}\n---\n\n# Body\n");
     fs::write(skill_dir.join("SKILL.md"), content).unwrap();
 }
+
+#[tokio::test]
+async fn protected_project_instructions_survive_changes_deletion_and_new_override() {
+    use codex_instruction_control::{ForkConfig, PolicySnapshot, PolicySource, SourceKind};
+    let root = tempfile::tempdir().unwrap();
+    let path = root.path().join("AGENTS.md");
+    fs::write(&path, "accepted project instructions").unwrap();
+    let mut cfg = make_config(&root, 4096, None).await;
+    let mut sources = capture_agents_sources(&cfg).await.unwrap();
+    sources.extend([
+        PolicySource::new(SourceKind::MainPrompt, "main", "main".into()),
+        PolicySource::new(
+            SourceKind::ModelCatalog,
+            "models",
+            r#"{"models":[{"slug":"test","model_messages":{}}]}"#.into(),
+        ),
+    ]);
+    cfg.instruction_snapshot = Some(Arc::new(
+        PolicySnapshot::new(ForkConfig::default(), sources).unwrap(),
+    ));
+    fs::write(&path, "unapproved replacement").unwrap();
+    fs::write(
+        root.path().join("AGENTS.override.md"),
+        "unapproved override",
+    )
+    .unwrap();
+    let cwd = PathUri::from_abs_path(&cfg.cwd);
+    for remove in [false, true] {
+        if remove {
+            fs::remove_file(&path).unwrap();
+        }
+        let loaded = read_agents_md(&cfg, LOCAL_FS.as_ref(), "local", &cwd, 4096, None)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(loaded.text(), "accepted project instructions");
+    }
+    let nested = root.path().join("nested");
+    fs::create_dir(&nested).unwrap();
+    fs::create_dir(nested.join(".git")).unwrap();
+    let nested_cwd = PathUri::from_abs_path(&AbsolutePathBuf::from_absolute_path(nested).unwrap());
+    let loaded = read_agents_md(&cfg, LOCAL_FS.as_ref(), "local", &nested_cwd, 4096, None)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(loaded.text(), "accepted project instructions");
+}

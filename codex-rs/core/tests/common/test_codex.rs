@@ -837,9 +837,10 @@ impl TestCodexBuilder {
         let installation_id = resolve_installation_id(&config.codex_home).await?;
         let user_instructions_provider =
             self.user_instructions_provider.clone().unwrap_or_else(|| {
-                Arc::new(CodexHomeUserInstructionsProvider::new(
-                    config.codex_home.clone(),
-                ))
+                Arc::new(
+                    CodexHomeUserInstructionsProvider::new(config.codex_home.clone())
+                        .with_instruction_snapshot(config.instruction_snapshot.clone()),
+                )
             });
         let auth_manager = self.auth.manager_for_home(config.codex_home.as_path());
         let models_manager = self

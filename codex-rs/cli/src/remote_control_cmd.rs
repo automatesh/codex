@@ -76,6 +76,25 @@ pub(crate) async fn run(
         anyhow::bail!("`--no-daemon` cannot be used with a remote-control subcommand");
     }
 
+    if codex_instruction_control::runtime_snapshot().is_some() {
+        match command.subcommand {
+            None => {
+                return run_foreground_remote_control(
+                    command.json,
+                    arg0_paths,
+                    root_config_overrides,
+                )
+                .await;
+            }
+            Some(RemoteControlSubcommand::Start | RemoteControlSubcommand::Pair) => {
+                anyhow::bail!(
+                    "Protected instructions cannot start or pair through an unattested shared daemon. Use bare `codex remote-control` for the protected foreground app server."
+                );
+            }
+            Some(RemoteControlSubcommand::Stop) => {}
+        }
+    }
+
     if command.subcommand.is_none() {
         if command.no_daemon || command.json || !daemon_eligible(&root_config_overrides).await? {
             run_foreground_remote_control(command.json, arg0_paths, root_config_overrides).await?;
@@ -146,6 +165,9 @@ pub(crate) async fn run(
 }
 
 async fn daemon_eligible(root_config_overrides: &CliConfigOverrides) -> anyhow::Result<bool> {
+    if codex_instruction_control::runtime_snapshot().is_some() {
+        return Ok(false);
+    }
     if !root_config_overrides.raw_overrides.is_empty()
         || codex_login::is_workload_identity_selected()
         || std::env::var_os(codex_exec_server::CODEX_EXEC_SERVER_URL_ENV_VAR).is_some()

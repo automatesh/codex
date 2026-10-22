@@ -35,6 +35,7 @@ codex-app-server-protocol = { workspace = true }
 codex-arg0 = { workspace = true }
 codex-backend-client = { workspace = true }
 codex-install-context = { workspace = true }
+codex-instruction-control = { workspace = true }
 codex-cloud-config = { workspace = true }
 codex-config = { workspace = true }
 codex-context-fragments = { workspace = true }

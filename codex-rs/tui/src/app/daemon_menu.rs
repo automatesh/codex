@@ -27,6 +27,9 @@ impl Renderable for DaemonMenuHeader {
 
 impl App {
     pub(super) async fn verify_managed_daemon(&mut self) {
+        if codex_instruction_control::runtime_snapshot().is_some() {
+            return;
+        }
         // A discovered socket alone does not prove it belongs to a managed daemon.
         // Probe only when the user opens a view that offers restart, never during startup.
         if !self.reconnect.offline
@@ -50,7 +53,11 @@ impl App {
             .map(|connection| format!("Running daemon: {}", connection.version))
             .unwrap_or_else(|| "Not connected to the local background server.".to_string());
         let mut header = vec![Line::from("Daemon".bold()), Line::from(status.dim())];
-        let unavailable = if matches!(self.app_server_target, AppServerTarget::Remote { .. }) {
+        let unavailable = if codex_instruction_control::runtime_snapshot().is_some() {
+            Some(
+                "Protected instructions use the embedded app server. Shared daemon attachment and daemon updates are unavailable without backend attestation.",
+            )
+        } else if matches!(self.app_server_target, AppServerTarget::Remote { .. }) {
             Some(
                 "Manage this server on its host. Local daemon updates are unavailable for remote connections.",
             )
@@ -123,6 +130,9 @@ impl App {
     }
 
     pub(super) fn confirm_daemon_restart(&mut self) {
+        if codex_instruction_control::runtime_snapshot().is_some() {
+            return;
+        }
         if !self
             .chat_widget
             .remote_connection
@@ -157,6 +167,9 @@ impl App {
     }
 
     pub(super) fn confirm_daemon_update(&mut self, source: DaemonUpdateSource) {
+        if codex_instruction_control::runtime_snapshot().is_some() {
+            return;
+        }
         let Some(executable) = &self.daemon_cli_executable else {
             return;
         };

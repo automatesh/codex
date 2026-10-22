@@ -4,6 +4,8 @@ Fork of `openai/codex`, pinned to `rust-v0.163.0`
 (`83086188ae0614bd882818ff1aa23f3194962012`).
 
 This branch removes the client's outbound analytics and observability transports.
+The accepted instruction workflow and its remaining trust boundaries are documented
+in [INSTRUCTION_CONTROL.md](INSTRUCTION_CONTROL.md).
 It preserves the upstream coding and research engine: TUI, `exec`, shell and patch
 tools, MCP, skills, subagents, hooks, session persistence, resume, and compaction.
 
@@ -50,8 +52,8 @@ cargo build --locked -p codex-cli --bin codex
 
 The executable is written to `codex-rs/target/debug/codex` (`codex.exe` on Windows).
 Building does not install it or change an existing Codex installation.
-The Windows CI artifact also bundles the code-mode host, Responses proxy and three
-sandbox helper executables; keep these beside `codex.exe`.
+The Windows CI artifact also bundles the policy manager, code-mode host, Responses
+proxy and three sandbox helpers. Keep all seven EXEs together for installation.
 
 ## Checks
 

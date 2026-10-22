@@ -31,6 +31,8 @@ use codex_extension_api::Instructions;
 use codex_file_system::FileSystemSandboxContext;
 use codex_file_system::FindUpErrorPolicy;
 use codex_file_system::find_nearest_ancestor_with_markers;
+use codex_instruction_control::PolicySource;
+use codex_instruction_control::SourceKind;
 use codex_utils_absolute_path::AbsolutePathBuf;
 use codex_utils_path_uri::PathConvention;
 use codex_utils_path_uri::PathUri;
@@ -94,7 +96,7 @@ pub(crate) async fn load_project_instructions(
                 }
             }
             Ok(None) => {}
-            Err(error) if sandbox.is_none() => {
+            Err(error) if sandbox.is_none() && config.instruction_snapshot.is_none() => {
                 error!(
                     environment_id = turn_environment.selection.environment_id,
                     "error trying to find AGENTS.md docs: {error:#}"
@@ -147,10 +149,25 @@ async fn read_agents_md(
             break;
         }
 
-        let mut data = match fs.read_file(&p, ReadFileOptions::default(), sandbox).await {
-            Ok(data) => data,
-            Err(err) if err.kind() == io::ErrorKind::NotFound => continue,
-            Err(err) => return Err(err),
+        let mut data = if let Some(snapshot) = &config.instruction_snapshot {
+            let id = agents_source_id(&p);
+            let accepted = snapshot
+                .resolve(SourceKind::Agents, &id)
+                .map_err(|error| io::Error::other(error.to_string()))?;
+            if !fs
+                .read_file(&p, ReadFileOptions::default(), sandbox)
+                .await
+                .is_ok_and(|current| current == accepted.as_bytes())
+            {
+                tracing::warn!(path = %p, "AGENTS.md changed or disappeared; using accepted instructions");
+            }
+            accepted.as_bytes().to_vec()
+        } else {
+            match fs.read_file(&p, ReadFileOptions::default(), sandbox).await {
+                Ok(data) => data,
+                Err(err) if err.kind() == io::ErrorKind::NotFound => continue,
+                Err(err) => return Err(err),
+            }
         };
         let size = data.len() as u64;
         if size > remaining {
@@ -189,13 +206,32 @@ async fn read_agents_md(
 /// Discovers AGENTS.md files from the project root to the current working
 /// directory, inclusive. Symlinks are allowed.
 #[tracing::instrument(name = "agents_md.discover", skip_all)]
-async fn agents_md_paths(
+async fn agents_search_dirs(
     config: &Config,
     cwd: &PathUri,
     fs: &dyn ExecutorFileSystem,
     sandbox: Option<&FileSystemSandboxContext>,
 ) -> io::Result<Vec<PathUri>> {
     let dir = cwd.clone();
+    if let Some(snapshot) = &config.instruction_snapshot {
+        let mut dirs = Vec::new();
+        let mut cursor = Some(dir);
+        while let Some(directory) = cursor {
+            dirs.push(directory.clone());
+            if snapshot
+                .resolve(SourceKind::Builtin, &format!("agents-scope:{directory}"))
+                .is_ok()
+            {
+                dirs.reverse();
+                return Ok(dirs);
+            }
+            cursor = directory.parent();
+        }
+        return Err(io::Error::new(
+            io::ErrorKind::PermissionDenied,
+            "project instruction scope is not accepted; capture this working directory into a candidate and approve it",
+        ));
+    }
 
     let mut merged = TomlValue::Table(toml::map::Map::new());
     for layer in config.config_layer_stack.layers_low_to_high() {
@@ -220,7 +256,7 @@ async fn agents_md_paths(
         sandbox,
     )
     .await?;
-    let search_dirs = if let Some(root) = project_root {
+    Ok(if let Some(root) = project_root {
         let mut dirs = Vec::new();
         let mut cursor = dir.clone();
         loop {
@@ -237,7 +273,22 @@ async fn agents_md_paths(
         dirs
     } else {
         vec![dir]
-    };
+    })
+}
+
+fn agents_source_id(path: &PathUri) -> String {
+    path.to_abs_path()
+        .map(|path| path.to_string_lossy().to_string())
+        .unwrap_or_else(|_| path.to_string())
+}
+
+async fn agents_md_paths(
+    config: &Config,
+    cwd: &PathUri,
+    fs: &dyn ExecutorFileSystem,
+    sandbox: Option<&FileSystemSandboxContext>,
+) -> io::Result<Vec<PathUri>> {
+    let search_dirs = agents_search_dirs(config, cwd, fs, sandbox).await?;
 
     let candidate_filenames = candidate_filenames(config, cwd);
     let candidate_filenames = &candidate_filenames;
@@ -247,6 +298,16 @@ async fn agents_md_paths(
                 let candidate = directory
                     .join(name)
                     .map_err(|err| io::Error::new(io::ErrorKind::InvalidInput, err))?;
+                if let Some(snapshot) = &config.instruction_snapshot {
+                    if snapshot.resolve(SourceKind::Agents, &agents_source_id(&candidate)).is_ok() {
+                        return Ok(Some(candidate));
+                    }
+                    if fs.get_metadata(&candidate, GetMetadataOptions::default(), sandbox).await
+                        .is_ok_and(|metadata| metadata.is_file) {
+                        tracing::warn!(path = %candidate, "AGENTS.md is not approved and was not loaded");
+                    }
+                    continue;
+                }
                 match fs
                     .get_metadata(&candidate, GetMetadataOptions::default(), sandbox)
                     .await
@@ -267,6 +328,50 @@ async fn agents_md_paths(
         }
     }
     Ok(found)
+}
+
+/// Captures full source documents for explicit review, before rendering or truncation.
+pub async fn capture_agents_sources(config: &Config) -> io::Result<Vec<PolicySource>> {
+    let mut sources = std::collections::BTreeMap::new();
+    sources.insert(
+        "global-agents-home".to_string(),
+        PolicySource::new(
+            SourceKind::Builtin,
+            "global-agents-home",
+            config.codex_home.to_string_lossy().to_string(),
+        ),
+    );
+    for name in [LOCAL_AGENTS_MD_FILENAME, DEFAULT_AGENTS_MD_FILENAME] {
+        let path = config.codex_home.join(name);
+        match tokio::fs::read_to_string(path.as_path()).await {
+            Ok(text) => {
+                let id = path.to_string_lossy().to_string();
+                sources.insert(id.clone(), PolicySource::new(SourceKind::Agents, id, text));
+            }
+            Err(error) if error.kind() == io::ErrorKind::NotFound => {}
+            Err(error) => return Err(error),
+        }
+    }
+    let cwd = PathUri::from_abs_path(&config.cwd);
+    let directories =
+        agents_search_dirs(config, &cwd, codex_exec_server::LOCAL_FS.as_ref(), None).await?;
+    if let Some(root) = directories.first() {
+        let id = format!("agents-scope:{root}");
+        sources.insert(
+            id.clone(),
+            PolicySource::new(SourceKind::Builtin, id, root.to_string()),
+        );
+    }
+    for path in agents_md_paths(config, &cwd, codex_exec_server::LOCAL_FS.as_ref(), None).await? {
+        let text = codex_exec_server::LOCAL_FS
+            .read_file(&path, ReadFileOptions::default(), None)
+            .await?;
+        let text = String::from_utf8(text)
+            .map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error))?;
+        let id = agents_source_id(&path);
+        sources.insert(id.clone(), PolicySource::new(SourceKind::Agents, id, text));
+    }
+    Ok(sources.into_values().collect())
 }
 
 fn candidate_filenames<'a>(config: &'a Config, cwd: &PathUri) -> Vec<&'a str> {

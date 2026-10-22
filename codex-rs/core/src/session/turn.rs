@@ -1764,6 +1764,7 @@ async fn run_sampling_request(
         let responses_metadata = sess
             .responses_metadata(step_context.as_ref(), CodexResponsesRequestKind::Turn)
             .await;
+        crate::instruction_policy::verify_prompt(&turn_context.config, &prompt)?;
         if crate::guardian::is_basic_session_source(&turn_context.session_source) {
             crate::guardian::prepare_guardian_prompt(
                 &sess,

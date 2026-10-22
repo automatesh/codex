@@ -506,6 +506,11 @@ pub fn remote_addr_supports_auth_token(endpoint: &RemoteAppServerEndpoint) -> bo
 async fn connect_remote_app_server(
     endpoint: RemoteAppServerEndpoint,
 ) -> color_eyre::Result<AppServerClient> {
+    if codex_instruction_control::runtime_snapshot().is_some() {
+        color_eyre::eyre::bail!(
+            "Protected instructions cannot attach to a remote or shared daemon backend without accepted instruction attestation; use the embedded app server."
+        );
+    }
     let app_server = RemoteAppServerClient::connect(RemoteAppServerConnectArgs {
         endpoint,
         client_name: "codex-tui".to_string(),
@@ -521,6 +526,9 @@ async fn connect_remote_app_server(
 }
 
 async fn maybe_probe_default_daemon_socket(codex_home: &Path) -> Option<AbsolutePathBuf> {
+    if codex_instruction_control::runtime_snapshot().is_some() {
+        return None;
+    }
     let socket_path = codex_app_server_client::app_server_control_socket_path(codex_home).ok()?;
     #[cfg(windows)]
     let (validated_path, _directory) =
@@ -1032,6 +1040,33 @@ fn app_server_target_for_launch(
     workload_identity_selected: bool,
     exec_server_url: Option<&std::ffi::OsStr>,
 ) -> std::io::Result<AppServerTarget> {
+    app_server_target_for_launch_with_instruction_policy(
+        explicit_remote_endpoint,
+        default_daemon_socket,
+        can_reuse_implicit_local_daemon,
+        workload_identity_selected,
+        exec_server_url,
+        codex_instruction_control::runtime_snapshot().is_some(),
+    )
+}
+
+fn app_server_target_for_launch_with_instruction_policy(
+    explicit_remote_endpoint: Option<RemoteAppServerEndpoint>,
+    default_daemon_socket: Option<AbsolutePathBuf>,
+    can_reuse_implicit_local_daemon: bool,
+    workload_identity_selected: bool,
+    exec_server_url: Option<&std::ffi::OsStr>,
+    protected_instructions: bool,
+) -> std::io::Result<AppServerTarget> {
+    if protected_instructions {
+        if explicit_remote_endpoint.is_some() {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::PermissionDenied,
+                "Protected instructions require the embedded app server; remote and shared daemon backends have no accepted instruction attestation.",
+            ));
+        }
+        return Ok(AppServerTarget::Embedded);
+    }
     if workload_identity_selected {
         if explicit_remote_endpoint.is_some() {
             return Err(std::io::Error::new(
@@ -3164,6 +3199,64 @@ requires_openai_auth = {requires_openai_auth}
                 AppServerTarget::Embedded,
             );
         }
+        Ok(())
+    }
+
+    #[test]
+    fn protected_launch_never_attaches_old_default_daemon() -> color_eyre::Result<()> {
+        let old_socket = AbsolutePathBuf::relative_to_current_dir("old-default-daemon.sock")?;
+        assert_eq!(
+            app_server_target_for_launch_with_instruction_policy(
+                None,
+                Some(old_socket.clone()),
+                true,
+                false,
+                None,
+                true
+            )?,
+            AppServerTarget::Embedded
+        );
+        assert!(matches!(
+            app_server_target_for_launch_with_instruction_policy(
+                None,
+                Some(old_socket),
+                true,
+                false,
+                None,
+                false
+            )?,
+            AppServerTarget::LocalDaemon { .. }
+        ));
+        Ok(())
+    }
+
+    #[test]
+    fn protected_launch_rejects_explicit_backend_instead_of_ignoring_it() -> color_eyre::Result<()>
+    {
+        let endpoint = RemoteAppServerEndpoint::UnixSocket {
+            socket_path: AbsolutePathBuf::relative_to_current_dir("explicit-backend.sock")?,
+        };
+        let error = app_server_target_for_launch_with_instruction_policy(
+            Some(endpoint.clone()),
+            None,
+            true,
+            false,
+            None,
+            true,
+        )
+        .unwrap_err();
+        assert_eq!(error.kind(), std::io::ErrorKind::PermissionDenied);
+        assert!(matches!(
+            app_server_target_for_launch_with_instruction_policy(
+                Some(endpoint),
+                None,
+                true,
+                false,
+                None,
+                false
+            )?,
+            AppServerTarget::Remote { .. }
+        ));
         Ok(())
     }
 

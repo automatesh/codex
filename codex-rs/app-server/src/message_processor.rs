@@ -350,14 +350,15 @@ impl MessageProcessor {
                     goal_service: Arc::clone(&goal_service),
                     environment_manager: Arc::clone(&environment_manager_for_extensions),
                     executor_skill_provider: Arc::clone(&executor_skill_provider),
-                    git_attribution_base_url: config.chatgpt_base_url.clone(),
-                    http_client_factory: config.http_client_factory(),
+                    commit_trailer: config.fork.git_attribution.commit_trailer.clone(),
+                    pr_footer: config.fork.git_attribution.pr_footer.clone(),
                     queue_service: queue_service.clone(),
                     turn_start_admission: Some(Arc::clone(&turn_start_admission)),
                 }),
-                Arc::new(CodexHomeUserInstructionsProvider::new(
-                    config.codex_home.clone(),
-                )),
+                Arc::new(
+                    CodexHomeUserInstructionsProvider::new(config.codex_home.clone())
+                        .with_instruction_snapshot(config.instruction_snapshot.clone()),
+                ),
                 Some(analytics_events_client.clone()),
                 codex_core::passthrough_image_store(),
                 Arc::clone(&thread_store),

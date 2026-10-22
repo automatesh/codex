@@ -30,9 +30,10 @@ async fn build_prompt_input_includes_context_and_user_message() -> Result<()> {
         })
         .build()
         .await?;
-    let user_instructions_provider = Arc::new(CodexHomeUserInstructionsProvider::new(
-        config.codex_home.clone(),
-    ));
+    let user_instructions_provider = Arc::new(
+        CodexHomeUserInstructionsProvider::new(config.codex_home.clone())
+            .with_instruction_snapshot(config.instruction_snapshot.clone()),
+    );
     let input = build_prompt_input(
         config,
         vec![UserInput::Text {

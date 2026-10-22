@@ -1504,12 +1504,44 @@ impl UnifiedExecProcessManager {
             Some("windows") | Some(_) => DangerousCommandPlatform::Windows,
             None => DangerousCommandPlatform::host(),
         };
+        if context
+            .step_context
+            .turn
+            .config
+            .fork
+            .controls
+            .dangerous_commands
+            == codex_instruction_control::DangerousCommands::Warn
+            && context
+                .session
+                .services
+                .exec_policy
+                .dangerous_command_warning(
+                    &request.command,
+                    request.turn_environment.config().exec_policy.as_ref(),
+                    command_platform,
+                )
+        {
+            context.session.send_event(
+                context.step_context.turn.as_ref(),
+                EventMsg::Warning(codex_protocol::protocol::WarningEvent {
+                    message: "Dangerous-command heuristic matched. The accepted policy is warn; explicit command rules and sandbox restrictions still apply.".into(),
+                }),
+            ).await;
+        }
         let exec_approval_requirement = context
             .session
             .services
             .exec_policy
             .create_exec_approval_requirement_for_shell(
                 ExecApprovalRequest {
+                    dangerous_commands: context
+                        .step_context
+                        .turn
+                        .config
+                        .fork
+                        .controls
+                        .dangerous_commands,
                     command: &request.command,
                     approval_policy: context.step_context.settings.approval_policy(),
                     permission_profile: request.turn_environment.permission_profile().clone(),
@@ -1524,7 +1556,6 @@ impl UnifiedExecProcessManager {
                         request.sandbox_permissions
                     },
                     prefix_rule: request.prefix_rule.clone(),
-                    allow_prefix_rules: context.step_context.turn.allow_prefix_rules(),
                 },
                 configured_shell,
                 command_platform,

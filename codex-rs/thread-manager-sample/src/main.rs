@@ -139,9 +139,10 @@ async fn run_main(arg0_paths: Arg0DispatchPaths) -> anyhow::Result<()> {
         .await?,
     );
     let installation_id = resolve_installation_id(&config.codex_home).await?;
-    let user_instructions_provider = Arc::new(CodexHomeUserInstructionsProvider::new(
-        config.codex_home.clone(),
-    ));
+    let user_instructions_provider = Arc::new(
+        CodexHomeUserInstructionsProvider::new(config.codex_home.clone())
+            .with_instruction_snapshot(config.instruction_snapshot.clone()),
+    );
     let mut extensions = ExtensionRegistryBuilder::<Config>::new();
     install_image_generation_extension(&mut extensions, auth_manager.clone(), |config: &Config| {
         Some(config.codex_home.clone())

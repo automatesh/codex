@@ -1,5 +1,6 @@
 use crate::client::ModelClient;
 use crate::client::X_CODEX_TURN_METADATA_HEADER;
+use crate::config::Config;
 use crate::context::ContextualUserFragment;
 use crate::context::RealtimeDelegation;
 use crate::context::RealtimeDelegationSource;
@@ -32,6 +33,8 @@ use codex_api::map_api_error;
 use codex_config::config_toml::RealtimeWsMode;
 use codex_config::config_toml::RealtimeWsVersion;
 use codex_http_client::HttpClientFactory;
+use codex_instruction_control::PolicySource;
+use codex_instruction_control::SourceKind;
 use codex_login::CodexAuth;
 use codex_login::default_client::add_originator_header;
 use codex_login::default_client::default_headers;
@@ -1511,6 +1514,87 @@ fn validate_avas_webrtc_start(
     Ok(())
 }
 
+fn realtime_instruction_sources(
+    config: &Config,
+    params: &ConversationStartParams,
+    backend_prompt: &str,
+) -> Vec<PolicySource> {
+    let mut sources = vec![PolicySource::new(
+        SourceKind::InstructionFragment,
+        "realtime.backend.instructions",
+        backend_prompt.to_owned(),
+    )];
+    for (name, content) in [
+        (
+            "realtime.start.instructions",
+            params.realtime_start_instructions.as_deref(),
+        ),
+        (
+            "realtime.end.instructions",
+            params.realtime_end_instructions.as_deref(),
+        ),
+        (
+            "realtime.backend_item_prefix.instructions",
+            params
+                .codex_responses_as_items
+                .then_some(params.codex_response_item_prefix.as_deref())
+                .flatten(),
+        ),
+    ] {
+        if let Some(content) = content {
+            sources.push(PolicySource::new(
+                SourceKind::InstructionFragment,
+                name,
+                content.to_owned(),
+            ));
+        }
+    }
+    if params.include_startup_context {
+        match config.experimental_realtime_ws_startup_context.as_ref() {
+            Some(content) => sources.push(PolicySource::new(
+                SourceKind::InstructionFragment,
+                "realtime.startup_context.instructions",
+                content.clone(),
+            )),
+            None => {
+                for (name, content) in [
+                    (
+                        "realtime.startup_context.header.instructions",
+                        crate::realtime_context::STARTUP_CONTEXT_HEADER,
+                    ),
+                    (
+                        "realtime.startup_context.notes.instructions",
+                        crate::realtime_context::STARTUP_CONTEXT_NOTES,
+                    ),
+                ] {
+                    sources.push(PolicySource::new(
+                        SourceKind::InstructionFragment,
+                        name,
+                        content.to_owned(),
+                    ));
+                }
+            }
+        }
+    }
+    for (index, item) in params.initial_items.iter().enumerate() {
+        if item.role == ConversationTextRole::Developer {
+            sources.push(PolicySource::new(
+                SourceKind::InstructionFragment,
+                format!("realtime.initial.{index}.developer.instructions"),
+                item.text.clone(),
+            ));
+        }
+    }
+    sources
+}
+
+fn backend_conversation_item(text: String) -> ConversationTextParams {
+    ConversationTextParams {
+        text,
+        role: ConversationTextRole::Assistant,
+    }
+}
+
 pub(crate) async fn build_realtime_session_config(
     sess: &Arc<Session>,
     params: &ConversationStartParams,
@@ -1541,6 +1625,10 @@ pub(crate) async fn build_realtime_session_config(
         params.prompt.clone(),
         config.experimental_realtime_ws_backend_prompt.clone(),
     );
+    crate::instruction_policy::verify_sources(
+        &config,
+        realtime_instruction_sources(&config, params, &prompt),
+    )?;
     let startup_context = if params.include_startup_context {
         match config.experimental_realtime_ws_startup_context.clone() {
             Some(startup_context) => startup_context,
@@ -1990,6 +2078,24 @@ pub(crate) async fn handle_text(
     sub_id: String,
     params: ConversationTextParams,
 ) {
+    if params.role == ConversationTextRole::Developer {
+        let config = sess.get_config().await;
+        if let Err(error) = crate::instruction_policy::verify_sources(
+            &config,
+            vec![PolicySource::new(
+                SourceKind::InstructionFragment,
+                format!(
+                    "realtime.input.developer:{}",
+                    codex_instruction_control::sha256(params.text.as_bytes())
+                ),
+                params.text.clone(),
+            )],
+        ) {
+            send_conversation_error(sess, sub_id, error.to_string(), CodexErrorInfo::BadRequest)
+                .await;
+            return;
+        }
+    }
     debug!(text = %params.text, "[realtime-text] appending realtime conversation text input");
     if let Err(err) = sess.conversation.text_in(params).await {
         error!("failed to append realtime text: {err}");
@@ -2407,8 +2513,9 @@ async fn handle_handoff_output(
                     .await
             }
             RealtimeOutbound::ConversationItem { text, phase: _ } => {
+                let item = backend_conversation_item(text);
                 writer
-                    .send_conversation_item_create(text, ConversationTextRole::Developer)
+                    .send_conversation_item_create(item.text, item.role)
                     .await
             }
             RealtimeOutbound::HandoffCompleteAck { .. } => Ok(()),
@@ -2482,12 +2589,13 @@ async fn handle_handoff_output(
                 .await
             }
             RealtimeOutbound::ConversationItem { text, phase } => {
+                let item = backend_conversation_item(text);
                 v3_output_writer(
                     writer,
                     phase.as_ref(),
                     handoff_state.codex_response_handoff_mode,
                 )
-                .send_conversation_item_create(text, ConversationTextRole::Developer)
+                .send_conversation_item_create(item.text, item.role)
                 .await
             }
             RealtimeOutbound::HandoffCompleteAck { .. } => Ok(()),
@@ -2560,8 +2668,9 @@ async fn handle_handoff_output(
                 }
             }
             RealtimeOutbound::ConversationItem { text, phase: _ } => {
+                let item = backend_conversation_item(text);
                 writer
-                    .send_conversation_item_create(text, ConversationTextRole::Developer)
+                    .send_conversation_item_create(item.text, item.role)
                     .await
             }
             RealtimeOutbound::HandoffCompleteAck { handoff_id } => {

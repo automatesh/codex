@@ -67,6 +67,7 @@ mod exec_server_args_tests;
 mod exec_server_auth;
 mod exec_server_command;
 mod exec_server_telemetry;
+mod instructions_cmd;
 mod marketplace_cmd;
 mod mcp_cmd;
 mod mcp_login;
@@ -145,6 +146,8 @@ struct MultitoolCli {
 
 #[derive(Debug, clap::Subcommand)]
 enum Subcommand {
+    /// Inspect, prepare and explicitly accept protected instruction versions.
+    Instructions(instructions_cmd::InstructionsCommand),
     /// Browse all agent sessions on the shared local app-server daemon.
     Agents(AgentsCommand),
 
@@ -1049,6 +1052,14 @@ async fn cli_main(
         mut interactive,
         subcommand,
     } = MultitoolCli::parse();
+    #[cfg(windows)]
+    if !matches!(
+        &subcommand,
+        Some(Subcommand::Instructions(_)) | Some(Subcommand::Completion(_))
+    ) {
+        let snapshot = codex_instruction_control::initialize_runtime()?;
+        eprintln!("Accepted instructions: {}", snapshot.snapshot_id);
+    }
     // Retain the launch target through TUI exit, even if a launcher changes selection.
     let daemon_cli_executable = arg0_paths
         .codex_self_exe
@@ -1094,6 +1105,7 @@ async fn cli_main(
 
     let open_agents_overview = matches!(&subcommand, Some(Subcommand::Agents(_)));
     match subcommand {
+        Some(Subcommand::Instructions(args)) => instructions_cmd::run(args).await?,
         None | Some(Subcommand::Agents(_)) => {
             prepend_config_flags(
                 &mut interactive.config_overrides,
@@ -1235,6 +1247,10 @@ async fn cli_main(
             }
         }
         Some(Subcommand::AppServer(app_server_cli)) => {
+            reject_unverified_backend_route(
+                app_server_cli.subcommand.as_ref(),
+                codex_instruction_control::runtime_snapshot().is_some(),
+            )?;
             let AppServerCommand {
                 subcommand,
                 code_mode_host,
@@ -1634,6 +1650,11 @@ async fn cli_main(
             print_completion(completion_cli);
         }
         Some(Subcommand::Update) => {
+            if codex_instruction_control::runtime_snapshot().is_some() {
+                anyhow::bail!(
+                    "Protected fork updates require a reviewed fork distribution; the public upstream updater is not used."
+                );
+            }
             reject_remote_mode_for_subcommand(
                 root_remote.as_deref(),
                 root_remote_auth_token_env.as_deref(),
@@ -2053,17 +2074,15 @@ async fn run_debug_prompt_input_command(
         });
     }
 
-    let user_instructions_provider = Arc::new(CodexHomeUserInstructionsProvider::new(
-        config.codex_home.clone(),
-    ));
-    let auth_manager =
-        AuthManager::shared_from_config(&config, /*enable_codex_api_key_env*/ false).await?;
+    let user_instructions_provider = Arc::new(
+        CodexHomeUserInstructionsProvider::new(config.codex_home.clone())
+            .with_instruction_snapshot(config.instruction_snapshot.clone()),
+    );
     let mut extensions = codex_extension_api::ExtensionRegistryBuilder::new();
     codex_git_attribution::install(
         &mut extensions,
-        auth_manager,
-        config.chatgpt_base_url.clone(),
-        config.http_client_factory(),
+        config.fork.git_attribution.commit_trailer.clone(),
+        config.fork.git_attribution.pr_footer.clone(),
     );
     codex_skills_extension::install(&mut extensions, |config: &Config| {
         codex_skills_extension::SkillsExtensionConfig {
@@ -2270,6 +2289,7 @@ fn unsupported_subcommand_name_for_strict_config(
             Some(app_server_subcommand_name(app_server.subcommand.as_ref()))
         }
         Some(Subcommand::RemoteControl(remote_control)) => Some(remote_control.subcommand_name()),
+        Some(Subcommand::Instructions(_)) => Some("instructions"),
         Some(Subcommand::Mcp(_)) => Some("mcp"),
         Some(Subcommand::Plugin(_)) => Some("plugin"),
         Some(Subcommand::MigrateRollouts(_)) => Some("migrate-rollouts"),
@@ -2321,6 +2341,28 @@ fn reject_remote_mode_for_app_server_subcommand(
 ) -> anyhow::Result<()> {
     let subcommand_name = app_server_subcommand_name(subcommand);
     reject_remote_mode_for_subcommand(remote, remote_auth_token_env, subcommand_name)
+}
+
+fn reject_unverified_backend_route(
+    subcommand: Option<&AppServerSubcommand>,
+    protected: bool,
+) -> anyhow::Result<()> {
+    let rejected = match subcommand {
+        Some(AppServerSubcommand::Proxy(_)) => true,
+        Some(AppServerSubcommand::Daemon(command)) => !matches!(
+            command.subcommand,
+            AppServerDaemonSubcommand::Stop
+                | AppServerDaemonSubcommand::Version
+                | AppServerDaemonSubcommand::DisableRemoteControl
+        ),
+        _ => false,
+    };
+    if protected && rejected {
+        anyhow::bail!(
+            "This daemon/backend route has no protected backend attestation. Use the protected embedded TUI or run codex app-server in the foreground."
+        );
+    }
+    Ok(())
 }
 
 fn app_server_subcommand_name(subcommand: Option<&AppServerSubcommand>) -> &'static str {
@@ -4696,6 +4738,28 @@ enabled = true
                 socket_path: None
             }))
         ));
+    }
+
+    #[test]
+    fn protected_backend_routes_reject_unverified_daemon_and_proxy() {
+        for name in [
+            "start",
+            "restart",
+            "update",
+            "bootstrap",
+            "enable-remote-control",
+        ] {
+            let command = app_server_from_args(&["codex", "app-server", "daemon", name]);
+            assert!(reject_unverified_backend_route(command.subcommand.as_ref(), true).is_err());
+            assert!(reject_unverified_backend_route(command.subcommand.as_ref(), false).is_ok());
+        }
+        let proxy = app_server_from_args(&["codex", "app-server", "proxy"]);
+        assert!(reject_unverified_backend_route(proxy.subcommand.as_ref(), true).is_err());
+        assert!(reject_unverified_backend_route(None, true).is_ok());
+        for name in ["stop", "version", "disable-remote-control"] {
+            let command = app_server_from_args(&["codex", "app-server", "daemon", name]);
+            assert!(reject_unverified_backend_route(command.subcommand.as_ref(), true).is_ok());
+        }
     }
 
     #[test]

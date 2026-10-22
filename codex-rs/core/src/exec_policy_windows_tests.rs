@@ -75,6 +75,7 @@ fn unmatched_powershell_read_requires_approval_without_sandbox() {
         render_decision_for_unmatched_command(
             &command,
             UnmatchedCommandContext {
+                dangerous_commands: codex_instruction_control::DangerousCommands::Confirm,
                 approval_policy: AskForApproval::UnlessTrusted,
                 permission_profile: &PermissionProfile::read_only(),
                 windows_sandbox_level: WindowsSandboxLevel::Disabled,
@@ -98,6 +99,7 @@ fn read_only_windows_sandbox_runs_unmatched_commands_under_sandbox() {
             render_decision_for_unmatched_command(
                 &command,
                 UnmatchedCommandContext {
+                    dangerous_commands: codex_instruction_control::DangerousCommands::Confirm,
                     approval_policy: AskForApproval::Never,
                     permission_profile: &PermissionProfile::read_only(),
                     windows_sandbox_level,
@@ -118,6 +120,7 @@ fn read_only_windows_policy_without_sandbox_backend_still_requires_approval() {
         render_decision_for_unmatched_command(
             &command,
             UnmatchedCommandContext {
+                dangerous_commands: codex_instruction_control::DangerousCommands::Confirm,
                 approval_policy: AskForApproval::Never,
                 permission_profile: &PermissionProfile::read_only(),
                 windows_sandbox_level: WindowsSandboxLevel::Disabled,
@@ -158,6 +161,7 @@ fn writable_windows_policy_without_sandbox_backend_still_requires_approval() {
         render_decision_for_unmatched_command(
             &command,
             UnmatchedCommandContext {
+                dangerous_commands: codex_instruction_control::DangerousCommands::Confirm,
                 approval_policy: AskForApproval::Never,
                 permission_profile: &permission_profile,
                 windows_sandbox_level: WindowsSandboxLevel::Disabled,

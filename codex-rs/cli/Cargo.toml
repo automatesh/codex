@@ -23,6 +23,7 @@ doctest = false
 workspace = true
 
 [dependencies]
+codex-instruction-control = { workspace = true }
 codex-utils-process = { workspace = true }
 anyhow = { workspace = true }
 chrono = { workspace = true }
@@ -45,6 +46,7 @@ codex-core = { workspace = true }
 codex-core-plugins = { workspace = true }
 codex-history = { workspace = true }
 codex-home = { workspace = true }
+codex-hooks = { workspace = true }
 codex-http-client = { workspace = true }
 codex-exec = { workspace = true }
 codex-exec-server = { workspace = true }

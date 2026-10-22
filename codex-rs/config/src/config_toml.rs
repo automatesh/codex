@@ -249,6 +249,9 @@ pub struct ConfigToml {
     /// System instructions.
     pub instructions: Option<String>,
 
+    #[serde(default)]
+    pub fork: codex_instruction_control::ForkConfig,
+
     /// Developer instructions inserted as a `developer` role message.
     #[serde(default)]
     pub developer_instructions: Option<String>,

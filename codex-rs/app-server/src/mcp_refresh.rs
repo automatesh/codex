@@ -485,14 +485,15 @@ enabled = false
                     goal_service: Arc::new(codex_goal_extension::GoalService::new()),
                     environment_manager: Arc::clone(&environment_manager),
                     executor_skill_provider: Arc::clone(&executor_skill_provider),
-                    git_attribution_base_url: good_config.chatgpt_base_url.clone(),
-                    http_client_factory: good_config.http_client_factory(),
+                    commit_trailer: good_config.fork.git_attribution.commit_trailer.clone(),
+                    pr_footer: good_config.fork.git_attribution.pr_footer.clone(),
                     queue_service: None,
                     turn_start_admission: None,
                 }),
-                Arc::new(CodexHomeUserInstructionsProvider::new(
-                    good_config.codex_home.clone(),
-                )),
+                Arc::new(
+                    CodexHomeUserInstructionsProvider::new(good_config.codex_home.clone())
+                        .with_instruction_snapshot(good_config.instruction_snapshot.clone()),
+                ),
                 /*analytics_events_client*/ None,
                 codex_core::passthrough_image_store(),
                 Arc::clone(&thread_store),

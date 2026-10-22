@@ -25,6 +25,7 @@ members = [
     "feedback",
     "features",
     "install-context",
+    "instruction-control",
     "codex-backend-openapi-models",
     "code-mode",
     "code-mode-host",
@@ -167,6 +168,7 @@ license = "Apache-2.0"
 
 [workspace.dependencies]
 # Internal
+codex-instruction-control = { path = "instruction-control" }
 codex-realtime-webrtc = { path = "realtime-webrtc" }
 app_test_support = { path = "app-server/tests/common" }
 codex-analytics = { path = "analytics" }

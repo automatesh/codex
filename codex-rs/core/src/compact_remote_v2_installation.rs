@@ -26,6 +26,13 @@ pub(super) async fn run_compaction(
     candidate: Option<BackgroundCompactionCandidate>,
     fallback: CompactionFallback,
 ) -> CodexResult<bool> {
+    if sess
+        .rebuild_stale_compaction_context(replacement_step_context, world_state)
+        .await?
+    {
+        sess.record_context_updates_and_set_reference_context_item(replacement_step_context)
+            .await?;
+    }
     if let Some(candidate) = candidate {
         let installed = build_and_install_compaction(
             sess,
@@ -107,7 +114,7 @@ async fn build_and_install_compaction(
         sess.emit_turn_item_started(turn_context, &compaction_item)
             .await;
     }
-    let (attempt, compaction_turn_context, prefix) = if let Some(candidate) = candidate {
+    let (attempt, compaction_step_context, prefix) = if let Some(candidate) = candidate {
         let mut attempt = candidate.attempt;
         if compaction_trace.is_enabled() {
             attempt.trace_input_history =
@@ -115,7 +122,7 @@ async fn build_and_install_compaction(
         }
         (
             attempt,
-            turn_context,
+            step_context,
             Some((
                 candidate.prefix,
                 candidate.model_info,
@@ -129,11 +136,13 @@ async fn build_and_install_compaction(
             &compaction_trace,
             compaction_metadata,
             analytics_details,
+            sess.instruction_context_fingerprint(step_context, world_state)
+                .await,
             RemoteCompactV2AttemptInput::Foreground(client_session.as_deref_mut()),
         )
         .await;
-        let (attempt, compaction_turn_context) = match attempt {
-            Ok(attempt) => (attempt, turn_context),
+        let (attempt, compaction_step_context) = match attempt {
+            Ok(attempt) => (attempt, step_context),
             Err(error) => {
                 let fallback_turn_context = &replacement_step_context.turn;
                 if !should_retry_with_current_model(&error, turn_context, fallback_turn_context) {
@@ -154,6 +163,8 @@ async fn build_and_install_compaction(
                     &fallback_compaction_trace,
                     compaction_metadata,
                     analytics_details,
+                    sess.instruction_context_fingerprint(replacement_step_context, world_state)
+                        .await,
                     RemoteCompactV2AttemptInput::Foreground(client_session),
                 )
                 .await;
@@ -166,14 +177,16 @@ async fn build_and_install_compaction(
                     fallback_result.as_ref().err(),
                 );
                 match fallback_result {
-                    Ok(attempt) => (attempt, fallback_turn_context),
+                    Ok(attempt) => (attempt, replacement_step_context),
                     Err(_) => return Err(error),
                 }
             }
         };
-        (attempt, compaction_turn_context, None)
+        (attempt, compaction_step_context, None)
     };
+    let compaction_turn_context = &compaction_step_context.turn;
     let RemoteCompactV2Attempt {
+        instruction_snapshot_id,
         input_goal_ids,
         trace_input_history,
         prompt_input,
@@ -202,6 +215,12 @@ async fn build_and_install_compaction(
     );
     let reviewer_compaction_hash = reviewer_compaction_hash(sess, turn_context).await;
     let installed = if let Some((prefix, model_info, cutoff_world_state)) = prefix {
+        let current_instruction_snapshot_id = sess
+            .instruction_context_fingerprint(replacement_step_context, world_state)
+            .await;
+        if instruction_snapshot_id != current_instruction_snapshot_id {
+            return Ok(false);
+        }
         let (initial_context, world_state_baseline) = sess
             .build_initial_context_with_world_state(replacement_step_context, &cutoff_world_state)
             .await;
@@ -215,6 +234,7 @@ async fn build_and_install_compaction(
             replacement_step_context.to_turn_context_item(),
             world_state_baseline,
             CompactedHistoryInstallation::Prefix {
+                instruction_snapshot_id,
                 prefix,
                 prefix_context,
                 initial_context,
@@ -227,6 +247,12 @@ async fn build_and_install_compaction(
         )
         .await
     } else {
+        let current_instruction_snapshot_id = sess
+            .instruction_context_fingerprint(replacement_step_context, world_state)
+            .await;
+        if instruction_snapshot_id != current_instruction_snapshot_id {
+            return Ok(false);
+        }
         let (new_history, world_state_baseline) = build_compaction_replacement_history(
             sess,
             replacement_step_context,
@@ -236,6 +262,7 @@ async fn build_and_install_compaction(
         .await;
         let (window_number, window_ids) = sess.advance_auto_compact_window().await;
         let installation = CompactedHistoryMetadata {
+            instruction_snapshot_id,
             input_goal_ids,
             message: String::new(),
             window_number,

@@ -18,6 +18,7 @@ codex-analytics = { workspace = true }
 codex-config = { workspace = true }
 codex-exec-server = { workspace = true }
 codex-extension-api = { workspace = true }
+codex-instruction-control = { workspace = true }
 codex-mcp = { workspace = true }
 codex-otel = { workspace = true }
 codex-protocol = { workspace = true }

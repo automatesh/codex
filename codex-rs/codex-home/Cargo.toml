@@ -12,6 +12,7 @@ workspace = true
 
 [dependencies]
 codex-extension-api = { workspace = true }
+codex-instruction-control = { workspace = true }
 codex-utils-absolute-path = { workspace = true }
 tokio = { workspace = true, features = ["fs"] }
 tracing = { workspace = true }

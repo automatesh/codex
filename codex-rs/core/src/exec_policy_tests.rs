@@ -1168,6 +1168,7 @@ fn unmatched_granular_policy_still_prompts_for_restricted_sandbox_escalation() {
         render_decision_for_unmatched_command(
             &command,
             UnmatchedCommandContext {
+                dangerous_commands: codex_instruction_control::DangerousCommands::Confirm,
                 approval_policy: AskForApproval::Granular(GranularApprovalConfig {
                     sandbox_approval: true,
                     rules: true,
@@ -1193,6 +1194,7 @@ fn unmatched_on_request_uses_permission_profile_file_system_policy_for_escalatio
         render_decision_for_unmatched_command(
             &command,
             UnmatchedCommandContext {
+                dangerous_commands: codex_instruction_control::DangerousCommands::Confirm,
                 approval_policy: AskForApproval::OnRequest,
                 permission_profile: &PermissionProfile::read_only(),
                 windows_sandbox_level: WindowsSandboxLevel::Disabled,
@@ -1212,6 +1214,7 @@ fn known_safe_on_request_still_prompts_for_restricted_sandbox_escalation() {
         render_decision_for_unmatched_command(
             &command,
             UnmatchedCommandContext {
+                dangerous_commands: codex_instruction_control::DangerousCommands::Confirm,
                 approval_policy: AskForApproval::OnRequest,
                 permission_profile: &PermissionProfile::workspace_write(),
                 windows_sandbox_level: WindowsSandboxLevel::RestrictedToken,
@@ -1437,6 +1440,7 @@ async fn mixed_rule_and_sandbox_prompt_prioritizes_rule_for_rejection_decision()
 
     let requirement = manager
         .create_exec_approval_requirement_for_command(ExecApprovalRequest {
+            dangerous_commands: codex_instruction_control::DangerousCommands::Confirm,
             command: &command,
             approval_policy: AskForApproval::Granular(GranularApprovalConfig {
                 sandbox_approval: true,
@@ -1450,7 +1454,6 @@ async fn mixed_rule_and_sandbox_prompt_prioritizes_rule_for_rejection_decision()
             windows_sandbox_level: WindowsSandboxLevel::Disabled,
             sandbox_permissions: SandboxPermissions::RequireEscalated,
             prefix_rule: None,
-            allow_prefix_rules: AllowPrefixRules::Honor,
         })
         .await;
 
@@ -1476,6 +1479,7 @@ async fn forced_rm_preserves_rule_rejection_when_granular_rules_are_disabled() {
 
     let requirement = manager
         .create_exec_approval_requirement_for_command(ExecApprovalRequest {
+            dangerous_commands: codex_instruction_control::DangerousCommands::Confirm,
             command: &command,
             approval_policy: AskForApproval::Granular(GranularApprovalConfig {
                 sandbox_approval: true,
@@ -1489,7 +1493,6 @@ async fn forced_rm_preserves_rule_rejection_when_granular_rules_are_disabled() {
             windows_sandbox_level: WindowsSandboxLevel::Disabled,
             sandbox_permissions: SandboxPermissions::RequireEscalated,
             prefix_rule: None,
-            allow_prefix_rules: AllowPrefixRules::Honor,
         })
         .await;
 
@@ -1508,6 +1511,7 @@ async fn exec_approval_requirement_falls_back_to_heuristics() {
     let manager = ExecPolicyManager::default();
     let requirement = manager
         .create_exec_approval_requirement_for_command(ExecApprovalRequest {
+            dangerous_commands: codex_instruction_control::DangerousCommands::Confirm,
             command: &command,
             approval_policy: AskForApproval::UnlessTrusted,
             permission_profile: PermissionProfile::read_only(),
@@ -1515,7 +1519,6 @@ async fn exec_approval_requirement_falls_back_to_heuristics() {
             windows_sandbox_level: WindowsSandboxLevel::Disabled,
             sandbox_permissions: SandboxPermissions::UseDefault,
             prefix_rule: None,
-            allow_prefix_rules: AllowPrefixRules::Honor,
         })
         .await;
 
@@ -1535,6 +1538,7 @@ async fn empty_bash_lc_script_falls_back_to_original_command() {
     let manager = ExecPolicyManager::default();
     let requirement = manager
         .create_exec_approval_requirement_for_command(ExecApprovalRequest {
+            dangerous_commands: codex_instruction_control::DangerousCommands::Confirm,
             command: &command,
             approval_policy: AskForApproval::UnlessTrusted,
             permission_profile: PermissionProfile::read_only(),
@@ -1542,7 +1546,6 @@ async fn empty_bash_lc_script_falls_back_to_original_command() {
             windows_sandbox_level: WindowsSandboxLevel::Disabled,
             sandbox_permissions: SandboxPermissions::UseDefault,
             prefix_rule: None,
-            allow_prefix_rules: AllowPrefixRules::Honor,
         })
         .await;
 
@@ -1566,6 +1569,7 @@ async fn whitespace_bash_lc_script_falls_back_to_original_command() {
     let manager = ExecPolicyManager::default();
     let requirement = manager
         .create_exec_approval_requirement_for_command(ExecApprovalRequest {
+            dangerous_commands: codex_instruction_control::DangerousCommands::Confirm,
             command: &command,
             approval_policy: AskForApproval::UnlessTrusted,
             permission_profile: PermissionProfile::read_only(),
@@ -1573,7 +1577,6 @@ async fn whitespace_bash_lc_script_falls_back_to_original_command() {
             windows_sandbox_level: WindowsSandboxLevel::Disabled,
             sandbox_permissions: SandboxPermissions::UseDefault,
             prefix_rule: None,
-            allow_prefix_rules: AllowPrefixRules::Honor,
         })
         .await;
 
@@ -1597,6 +1600,7 @@ async fn request_rule_uses_prefix_rule() {
 
     let requirement = manager
         .create_exec_approval_requirement_for_command(ExecApprovalRequest {
+            dangerous_commands: codex_instruction_control::DangerousCommands::Confirm,
             command: &command,
             approval_policy: AskForApproval::OnRequest,
             permission_profile: PermissionProfile::read_only(),
@@ -1604,7 +1608,6 @@ async fn request_rule_uses_prefix_rule() {
             windows_sandbox_level: WindowsSandboxLevel::Disabled,
             sandbox_permissions: SandboxPermissions::RequireEscalated,
             prefix_rule: Some(vec!["cargo".to_string(), "install".to_string()]),
-            allow_prefix_rules: AllowPrefixRules::Honor,
         })
         .await;
 
@@ -1631,6 +1634,7 @@ async fn request_rule_falls_back_when_prefix_rule_does_not_approve_all_commands(
 
     let requirement = manager
         .create_exec_approval_requirement_for_command(ExecApprovalRequest {
+            dangerous_commands: codex_instruction_control::DangerousCommands::Confirm,
             command: &command,
             approval_policy: AskForApproval::OnRequest,
             permission_profile: PermissionProfile::Disabled,
@@ -1638,7 +1642,6 @@ async fn request_rule_falls_back_when_prefix_rule_does_not_approve_all_commands(
             windows_sandbox_level: WindowsSandboxLevel::Disabled,
             sandbox_permissions: SandboxPermissions::RequireEscalated,
             prefix_rule: Some(vec!["cargo".to_string(), "install".to_string()]),
-            allow_prefix_rules: AllowPrefixRules::Honor,
         })
         .await;
 
@@ -1672,6 +1675,7 @@ async fn heuristics_apply_when_other_commands_match_policy() {
     assert_eq!(
         ExecPolicyManager::new(policy)
             .create_exec_approval_requirement_for_command(ExecApprovalRequest {
+                dangerous_commands: codex_instruction_control::DangerousCommands::Confirm,
                 command: &command,
                 approval_policy: AskForApproval::UnlessTrusted,
                 permission_profile: PermissionProfile::Disabled,
@@ -1679,7 +1683,6 @@ async fn heuristics_apply_when_other_commands_match_policy() {
                 windows_sandbox_level: WindowsSandboxLevel::Disabled,
                 sandbox_permissions: SandboxPermissions::UseDefault,
                 prefix_rule: None,
-                allow_prefix_rules: AllowPrefixRules::Honor,
             })
             .await,
         ExecApprovalRequirement::NeedsApproval {
@@ -2133,6 +2136,7 @@ async fn forced_rm_requires_approval_or_specific_rejection_on_all_platforms() {
         },
         policy
             .create_exec_approval_requirement_for_command(ExecApprovalRequest {
+                dangerous_commands: codex_instruction_control::DangerousCommands::Confirm,
                 command: &dangerous_command,
                 approval_policy: AskForApproval::OnRequest,
                 permission_profile: PermissionProfile::read_only(),
@@ -2140,7 +2144,6 @@ async fn forced_rm_requires_approval_or_specific_rejection_on_all_platforms() {
                 windows_sandbox_level: WindowsSandboxLevel::Disabled,
                 sandbox_permissions: permissions,
                 prefix_rule: None,
-                allow_prefix_rules: AllowPrefixRules::Honor,
             })
             .await,
         r#"On all platforms, a forbidden command should require approval
@@ -2156,6 +2159,7 @@ async fn forced_rm_requires_approval_or_specific_rejection_on_all_platforms() {
         },
         policy
             .create_exec_approval_requirement_for_command(ExecApprovalRequest {
+            dangerous_commands: codex_instruction_control::DangerousCommands::Confirm,
                 command: &dangerous_command,
                 approval_policy: AskForApproval::Never,
                 permission_profile: PermissionProfile::read_only(),
@@ -2163,7 +2167,6 @@ async fn forced_rm_requires_approval_or_specific_rejection_on_all_platforms() {
                 windows_sandbox_level: WindowsSandboxLevel::Disabled,
                 sandbox_permissions: permissions,
                 prefix_rule: None,
-                allow_prefix_rules: AllowPrefixRules::Honor,
             })
             .await,
         r#"On all platforms, a forbidden command should require approval
@@ -2216,6 +2219,7 @@ async fn verify_approval_requirement_for_unsafe_powershell_command() {
         expected_req,
         policy
             .create_exec_approval_requirement_for_command(ExecApprovalRequest {
+                dangerous_commands: codex_instruction_control::DangerousCommands::Confirm,
                 command: &sneaky_command,
                 approval_policy: AskForApproval::OnRequest,
                 permission_profile: PermissionProfile::read_only(),
@@ -2223,7 +2227,6 @@ async fn verify_approval_requirement_for_unsafe_powershell_command() {
                 windows_sandbox_level: WindowsSandboxLevel::Disabled,
                 sandbox_permissions: permissions,
                 prefix_rule: None,
-                allow_prefix_rules: AllowPrefixRules::Honor,
             })
             .await,
         "{pwsh_approval_reason}"
@@ -2310,6 +2313,7 @@ async fn exec_approval_requirement_for_command(
 
     ExecPolicyManager::new(policy)
         .create_exec_approval_requirement_for_command(ExecApprovalRequest {
+            dangerous_commands: codex_instruction_control::DangerousCommands::Confirm,
             command: &command,
             approval_policy,
             permission_profile,
@@ -2317,7 +2321,6 @@ async fn exec_approval_requirement_for_command(
             windows_sandbox_level: WindowsSandboxLevel::RestrictedToken,
             sandbox_permissions,
             prefix_rule,
-            allow_prefix_rules: AllowPrefixRules::Honor,
         })
         .await
 }
@@ -2484,4 +2487,71 @@ async fn exec_policy_warnings_ignore_untrusted_project_rules_without_config_toml
     }
 
     Ok(())
+}
+
+#[tokio::test]
+async fn dangerous_command_modes_preserve_explicit_rules_and_sandbox() {
+    use codex_instruction_control::DangerousCommands;
+    let command = vec!["rm".to_string(), "-rf".to_string(), "./fixture".to_string()];
+    for mode in [
+        DangerousCommands::Confirm,
+        DangerousCommands::Warn,
+        DangerousCommands::Block,
+        DangerousCommands::Off,
+    ] {
+        for rule in [None, Some("forbidden"), Some("prompt"), Some("allow")] {
+            let mut parser = PolicyParser::new();
+            if let Some(decision) = rule {
+                parser
+                    .parse(
+                        "test.rules",
+                        &format!(r#"prefix_rule(pattern=["rm"], decision="{decision}")"#),
+                    )
+                    .unwrap();
+            }
+            let manager = ExecPolicyManager::new(Arc::new(parser.build()));
+            let result = manager
+                .create_exec_approval_requirement_for_command_platform(
+                    ExecApprovalRequest {
+                        dangerous_commands: mode,
+                        command: &command,
+                        approval_policy: AskForApproval::Never,
+                        permission_profile: PermissionProfile::Disabled,
+                        environment_policy: None,
+                        windows_sandbox_level: WindowsSandboxLevel::Disabled,
+                        sandbox_permissions: SandboxPermissions::UseDefault,
+                        prefix_rule: None,
+                    },
+                    DangerousCommandPlatform::Posix,
+                )
+                .await;
+            match rule {
+                Some("forbidden" | "prompt") => {
+                    assert!(matches!(result, ExecApprovalRequirement::Forbidden { .. }))
+                }
+                Some("allow") => assert!(matches!(
+                    result,
+                    ExecApprovalRequirement::Skip {
+                        bypass_sandbox: true,
+                        ..
+                    }
+                )),
+                None if matches!(mode, DangerousCommands::Confirm | DangerousCommands::Block) => {
+                    assert!(matches!(result, ExecApprovalRequirement::Forbidden { .. }))
+                }
+                None => assert!(matches!(
+                    result,
+                    ExecApprovalRequirement::Skip {
+                        bypass_sandbox: false,
+                        ..
+                    }
+                )),
+                _ => unreachable!(),
+            }
+            assert_eq!(
+                manager.dangerous_command_warning(&command, None, DangerousCommandPlatform::Posix),
+                rule.is_none()
+            );
+        }
+    }
 }

@@ -267,6 +267,17 @@ impl ToolSearchHandler {
                     .enabled(Feature::CodeModeToolDescriptionFirst),
                 &indirect_prefixes,
             );
+            if step_context.turn.config.instruction_snapshot.is_some() {
+                let values = tools
+                    .iter()
+                    .map(serde_json::to_value)
+                    .collect::<Result<Vec<_>, _>>()
+                    .map_err(|error| FunctionCallError::Fatal(error.to_string()))?;
+                let sources = crate::instruction_policy::capture_code_search_sources(&values)
+                    .map_err(|error| FunctionCallError::Fatal(error.to_string()))?;
+                crate::instruction_policy::verify_sources(&step_context.turn.config, sources)
+                    .map_err(|error| FunctionCallError::Fatal(error.to_string()))?;
+            }
             return Ok(boxed_tool_output(JsonToolOutput::new(serde_json::json!({
                 "tools": tools,
             }))));
@@ -278,6 +289,17 @@ impl ToolSearchHandler {
 
         let mut tools = self.search(query, limit);
         indirect_prefixes.apply_search(&mut tools);
+        if step_context.turn.config.instruction_snapshot.is_some() {
+            let values = tools
+                .iter()
+                .map(serde_json::to_value)
+                .collect::<Result<Vec<_>, _>>()
+                .map_err(|error| FunctionCallError::Fatal(error.to_string()))?;
+            let sources = crate::instruction_policy::capture_deferred_tool_sources(&values)
+                .map_err(|error| FunctionCallError::Fatal(error.to_string()))?;
+            crate::instruction_policy::verify_sources(&step_context.turn.config, sources)
+                .map_err(|error| FunctionCallError::Fatal(error.to_string()))?;
+        }
 
         Ok(boxed_tool_output(ToolSearchOutput { tools }))
     }

@@ -11,9 +11,7 @@ use super::turn_context::TurnContext;
 use crate::config::Config;
 use crate::config::ConstraintResult;
 use crate::environment_selection::validate_environment_ids_and_cwds;
-use crate::exec_policy::AllowPrefixRules;
 use codex_features::Feature;
-use codex_protocol::openai_models::MODEL_SPECIALTY_CYBER;
 use codex_protocol::openai_models::ModelInfo;
 use codex_protocol::protocol::EnvironmentConfigState;
 use codex_protocol::protocol::TurnEnvironmentSelection;
@@ -39,15 +37,6 @@ fn check_legacy_turn_safety(
         .config_layer_stack
         .requirements()
         .auto_review_required_for_model(&turn_context.model_info().slug);
-    let ignored_models = stack
-        .requirements_toml()
-        .auto_review
-        .as_ref()
-        .and_then(|review| review.ignore_rules.as_ref());
-    let ignores_prefix_rules = |model: &ModelInfo| {
-        model.model_specialty.as_deref() == Some(MODEL_SPECIALTY_CYBER)
-            || ignored_models.is_some_and(|models| models.contains(&model.slug))
-    };
 
     // Approval policy and required-model classification still have consumers
     // using the originating turn. The reviewer is captured separately.
@@ -63,14 +52,6 @@ fn check_legacy_turn_safety(
     {
         return Err("the destination changes model-required approval authority".to_string());
     }
-    // Command approval continues to use TurnContext::allow_prefix_rules.
-    if ignores_prefix_rules(&destination.model_info) != ignores_prefix_rules(&current.model_info)
-        || ignores_prefix_rules(&destination.model_info)
-            != (turn_context.allow_prefix_rules() == AllowPrefixRules::IgnoreForCyberModel)
-    {
-        return Err("the destination changes the admitted prefix-rule policy".to_string());
-    }
-
     check_legacy_model_safety(
         turn_context.model_info(),
         &current.model_info,

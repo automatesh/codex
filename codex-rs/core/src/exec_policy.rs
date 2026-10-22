@@ -19,6 +19,7 @@ use codex_execpolicy::RequirementsExecPolicy;
 use codex_execpolicy::RuleMatch;
 use codex_execpolicy::blocking_append_allow_prefix_rule;
 use codex_execpolicy::blocking_append_network_rule;
+use codex_instruction_control::DangerousCommands;
 use codex_protocol::approvals::ExecPolicyAmendment;
 use codex_protocol::config_types::WindowsSandboxLevel;
 use codex_protocol::models::PermissionProfile;
@@ -42,8 +43,6 @@ use shlex::try_join as shlex_try_join;
 
 mod executable_identity;
 mod model_policy;
-
-pub(crate) use model_policy::AllowPrefixRules;
 
 const PROMPT_CONFLICT_REASON: &str =
     "approval required by policy, but AskForApproval is set to Never";
@@ -165,6 +164,7 @@ pub(crate) enum ExecPolicyCommandOrigin {
 
 #[derive(Clone, Copy)]
 pub(crate) struct UnmatchedCommandContext<'a> {
+    pub(crate) dangerous_commands: DangerousCommands,
     pub(crate) approval_policy: AskForApproval,
     pub(crate) permission_profile: &'a PermissionProfile,
     // TODO(anp): Reconcile this decision input with TurnEnvironment::sandbox_context
@@ -279,6 +279,7 @@ pub(crate) struct ExecPolicyManager {
 }
 
 pub(crate) struct ExecApprovalRequest<'a> {
+    pub(crate) dangerous_commands: DangerousCommands,
     pub(crate) command: &'a [String],
     pub(crate) approval_policy: AskForApproval,
     pub(crate) permission_profile: PermissionProfile,
@@ -288,7 +289,6 @@ pub(crate) struct ExecApprovalRequest<'a> {
     pub(crate) windows_sandbox_level: WindowsSandboxLevel,
     pub(crate) sandbox_permissions: SandboxPermissions,
     pub(crate) prefix_rule: Option<Vec<String>>,
-    pub(crate) allow_prefix_rules: AllowPrefixRules,
 }
 
 impl ExecPolicyManager {
@@ -310,6 +310,32 @@ impl ExecPolicyManager {
 
     pub(crate) fn current(&self) -> Arc<Policy> {
         self.policy.load_full()
+    }
+
+    pub(crate) fn dangerous_command_warning(
+        &self,
+        command: &[String],
+        environment_policy: Option<&RequirementsExecPolicy>,
+        platform: DangerousCommandPlatform,
+    ) -> bool {
+        let parsed = commands_for_exec_policy_for_platform(command, platform);
+        let warning = std::cell::Cell::new(false);
+        self.current_for_environment(environment_policy)
+            .check_multiple_with_options(
+                parsed.commands.iter(),
+                &|command| {
+                    if dangerous_command_match_for_origin(command, parsed.command_origin, platform)
+                        .is_some()
+                    {
+                        warning.set(true);
+                    }
+                    Decision::Allow
+                },
+                &MatchOptions {
+                    resolve_host_executables: true,
+                },
+            );
+        warning.get()
     }
 
     #[cfg(test)]
@@ -344,6 +370,7 @@ impl ExecPolicyManager {
         command_platform: DangerousCommandPlatform,
     ) -> ExecApprovalRequirement {
         let ExecApprovalRequest {
+            dangerous_commands,
             command,
             approval_policy,
             permission_profile,
@@ -351,15 +378,13 @@ impl ExecPolicyManager {
             windows_sandbox_level,
             sandbox_permissions,
             prefix_rule,
-            allow_prefix_rules,
         } = req;
-        let exec_policy = self.current_for_environment(environment_policy, allow_prefix_rules);
-        // Avoid reusable approvals when this model does not honor prefix rules.
-        let auto_amendment_allowed = allow_prefix_rules == AllowPrefixRules::Honor;
+        let exec_policy = self.current_for_environment(environment_policy);
         let exec_policy_fallback = |cmd: &[String]| {
             render_decision_for_unmatched_command_for_platform(
                 cmd,
                 UnmatchedCommandContext {
+                    dangerous_commands,
                     approval_policy,
                     permission_profile: &permission_profile,
                     windows_sandbox_level,
@@ -378,18 +403,14 @@ impl ExecPolicyManager {
             &match_options,
         );
 
-        let requested_amendment = if auto_amendment_allowed {
-            derive_requested_execpolicy_amendment_from_prefix_rule(
-                prefix_rule.as_ref(),
-                &evaluation.matched_rules,
-                exec_policy.as_ref(),
-                &commands,
-                &exec_policy_fallback,
-                &match_options,
-            )
-        } else {
-            None
-        };
+        let requested_amendment = derive_requested_execpolicy_amendment_from_prefix_rule(
+            prefix_rule.as_ref(),
+            &evaluation.matched_rules,
+            exec_policy.as_ref(),
+            &commands,
+            &exec_policy_fallback,
+            &match_options,
+        );
 
         match evaluation.decision {
             Decision::Forbidden => ExecApprovalRequirement::Forbidden {
@@ -426,13 +447,9 @@ impl ExecPolicyManager {
                     None => ExecApprovalRequirement::NeedsApproval {
                         reason: derive_prompt_reason(command, &evaluation),
                         proposed_execpolicy_amendment: requested_amendment.or_else(|| {
-                            if auto_amendment_allowed {
-                                try_derive_execpolicy_amendment_for_prompt_rules(
-                                    &evaluation.matched_rules,
-                                )
-                            } else {
-                                None
-                            }
+                            try_derive_execpolicy_amendment_for_prompt_rules(
+                                &evaluation.matched_rules,
+                            )
                         }),
                     },
                 }
@@ -452,11 +469,9 @@ impl ExecPolicyManager {
                             is_policy_match(rule_match) && rule_match.decision() == Decision::Allow
                         })
                 }),
-                proposed_execpolicy_amendment: if auto_amendment_allowed {
-                    try_derive_execpolicy_amendment_for_allow_rules(&evaluation.matched_rules)
-                } else {
-                    None
-                },
+                proposed_execpolicy_amendment: try_derive_execpolicy_amendment_for_allow_rules(
+                    &evaluation.matched_rules,
+                ),
             },
         }
     }
@@ -775,6 +790,7 @@ fn render_decision_for_unmatched_command_for_platform(
     let dangerous_command_match =
         dangerous_command_match_for_origin(command, context.command_origin, command_platform);
     let UnmatchedCommandContext {
+        dangerous_commands,
         approval_policy,
         permission_profile,
         windows_sandbox_level,
@@ -796,7 +812,11 @@ fn render_decision_for_unmatched_command_for_platform(
     // We prefer to prompt the user rather than outright forbid the command,
     // but if the user has explicitly disabled prompts, we must
     // forbid the command.
-    if dangerous_command_match.is_some() || windows_managed_fs_restrictions_without_sandbox_backend
+    if dangerous_command_match.is_some() && dangerous_commands == DangerousCommands::Block {
+        return Decision::Forbidden;
+    }
+    if (dangerous_command_match.is_some() && dangerous_commands == DangerousCommands::Confirm)
+        || windows_managed_fs_restrictions_without_sandbox_backend
     {
         return match approval_policy {
             AskForApproval::Never => Decision::Forbidden,

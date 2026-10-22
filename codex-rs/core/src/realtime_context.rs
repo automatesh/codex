@@ -27,7 +27,8 @@ use tracing::debug;
 use tracing::info;
 use tracing::warn;
 
-const STARTUP_CONTEXT_HEADER: &str = "Startup context from Codex.\nThis is background context about recent work and machine/workspace layout. It may be incomplete or stale. Use it to inform responses, and do not repeat it back unless relevant.";
+pub(crate) const STARTUP_CONTEXT_HEADER: &str = "Startup context from Codex.\nThis is background context about recent work and machine/workspace layout. It may be incomplete or stale. Use it to inform responses, and do not repeat it back unless relevant.";
+pub(crate) const STARTUP_CONTEXT_NOTES: &str = "Built at realtime startup from the current thread history, local thread metadata, and a bounded local workspace scan. This excludes repo memory instructions, AGENTS files, project-doc prompt blends, and memory summaries.";
 const STARTUP_CONTEXT_OPEN_TAG: &str = "<startup_context>";
 const STARTUP_CONTEXT_CLOSE_TAG: &str = "</startup_context>";
 const CURRENT_THREAD_SECTION_TOKEN_BUDGET: usize = 1_200;
@@ -107,7 +108,7 @@ pub(crate) async fn build_realtime_startup_context(
     }
     if let Some(section) = format_section(
         "Notes",
-        Some("Built at realtime startup from the current thread history, local thread metadata, and a bounded local workspace scan. This excludes repo memory instructions, AGENTS files, project-doc prompt blends, and memory summaries.".to_string()),
+        Some(STARTUP_CONTEXT_NOTES.to_string()),
         NOTES_SECTION_TOKEN_BUDGET,
     ) {
         parts.push(section);

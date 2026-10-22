@@ -317,6 +317,7 @@ impl MemoryStartupContext {
         prompt: &Prompt,
         context: &StageOneRequestContext,
     ) -> anyhow::Result<(String, Option<TokenUsage>)> {
+        codex_core::instruction_policy::verify_prompt(config, prompt)?;
         let installation_id = resolve_installation_id(&config.codex_home).await?;
         let config_snapshot = self.thread.config_snapshot().await;
         let session_source = config_snapshot.session_source;

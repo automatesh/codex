@@ -3168,7 +3168,7 @@ async fn prepares_resumed_history_before_installing_it() {
 }
 
 #[test]
-fn resolve_multi_agent_version_handles_unset_and_legacy_history() {
+fn resolve_multi_agent_version_ignores_archived_runtime_selection() {
     let thread_id = ThreadId::default();
 
     assert_eq!(
@@ -3188,7 +3188,7 @@ fn resolve_multi_agent_version_handles_unset_and_legacy_history() {
             }),
             /*inherited_multi_agent_version*/ None,
         ),
-        Some(MultiAgentVersion::V1)
+        None
     );
     assert_eq!(
         resolve_multi_agent_version(
@@ -3215,7 +3215,7 @@ fn resolve_multi_agent_version_handles_unset_and_legacy_history() {
             }),
             Some(MultiAgentVersion::V2),
         ),
-        Some(MultiAgentVersion::Disabled)
+        Some(MultiAgentVersion::V2)
     );
     assert_eq!(
         resolve_multi_agent_version(
@@ -3232,7 +3232,7 @@ fn resolve_multi_agent_version_handles_unset_and_legacy_history() {
             &InitialHistory::Forked(Vec::new()),
             /*inherited_multi_agent_version*/ None
         ),
-        Some(MultiAgentVersion::V1)
+        None
     );
 }
 
@@ -5933,6 +5933,7 @@ async fn settings_checkpoint_waits_for_accepted_settings_persistence() {
             turn_context.to_turn_context_item(),
             WorldStateSnapshot::default(),
             CompactedHistoryMetadata {
+                instruction_snapshot_id: None,
                 input_goal_ids: Default::default(),
                 message: "summary".to_string(),
                 window_number,
@@ -6067,6 +6068,7 @@ async fn mcp_attribution_checkpoints_cover_batch_prefixes_compaction_and_restore
             turn_context.to_turn_context_item(),
             WorldStateSnapshot::default(),
             CompactedHistoryMetadata {
+                instruction_snapshot_id: None,
                 input_goal_ids: Default::default(),
                 message: "summary".to_string(),
                 window_number,
@@ -6248,6 +6250,7 @@ async fn compaction_persists_resume_metadata_and_companion_records() {
             turn_context_baseline.clone(),
             world_state.render_full().0,
             CompactedHistoryMetadata {
+                instruction_snapshot_id: None,
                 input_goal_ids,
                 message: String::new(),
                 window_number,
@@ -11470,7 +11473,7 @@ enum TerminalEventKind {
     TurnAborted,
 }
 
-async fn attach_in_memory_thread_store(
+pub(super) async fn attach_in_memory_thread_store(
     session: &mut Session,
 ) -> Arc<codex_thread_store::InMemoryThreadStore> {
     let store = Arc::new(codex_thread_store::InMemoryThreadStore::default());

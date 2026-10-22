@@ -32,6 +32,7 @@ use codex_rollout_trace::CompactionTraceContext;
 use tracing::info;
 
 pub(super) struct RemoteCompactV2Attempt {
+    pub(super) instruction_snapshot_id: Option<String>,
     pub(super) input_goal_ids: HashSet<ResponseItemId>,
     pub(super) trace_input_history: Option<Vec<ResponseItem>>,
     pub(super) prompt_input: Vec<ResponseItem>,
@@ -70,6 +71,7 @@ pub(super) async fn run_remote_compact_v2_attempt(
     compaction_trace: &CompactionTraceContext,
     compaction_metadata: CompactionTurnMetadata,
     analytics_details: &mut CompactionAnalyticsDetails,
+    instruction_snapshot_id: Option<String>,
     input: RemoteCompactV2AttemptInput<'_>,
 ) -> CodexResult<RemoteCompactV2Attempt> {
     let turn_context = &step_context.turn;
@@ -221,6 +223,7 @@ pub(super) async fn run_remote_compact_v2_attempt(
     let mut prompt_input = prompt.input;
     prompt_input.pop();
     Ok(RemoteCompactV2Attempt {
+        instruction_snapshot_id,
         input_goal_ids,
         trace_input_history,
         prompt_input,
@@ -290,6 +293,19 @@ pub(crate) async fn run_background_compaction(
     prepared_input: BackgroundCompactionInput,
 ) -> CodexResult<BackgroundCompactionCandidate> {
     let prefix = prepared_input.prefix;
+    let instruction_snapshot_id = sess
+        .instruction_context_fingerprint(&step_context, &cutoff_world_state)
+        .await;
+    if Session::compaction_prompt_context_is_stale(
+        &prepared_input.input,
+        &prepared_input.metadata,
+        instruction_snapshot_id.as_deref(),
+    ) {
+        return Err(codex_protocol::error::CodexErr::InvalidRequest(
+            "Background compaction has a stale instruction context; full original history must be rebuilt before sending."
+                .to_owned(),
+        ));
+    }
     let metadata = CompactionTurnMetadata::new(
         CompactionTrigger::Auto,
         CompactionReason::ContextLimit,
@@ -302,6 +318,7 @@ pub(crate) async fn run_background_compaction(
         &CompactionTraceContext::disabled(),
         metadata,
         &mut CompactionAnalyticsDetails::default(),
+        instruction_snapshot_id,
         RemoteCompactV2AttemptInput::Background(prepared_input),
     )
     .await?;

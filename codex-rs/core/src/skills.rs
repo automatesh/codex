@@ -35,6 +35,7 @@ pub(crate) fn skills_load_input_from_config(
         effective_skill_roots,
         config.config_layer_stack.clone(),
     )
+    .with_instruction_snapshot(config.instruction_snapshot.clone())
 }
 
 pub(crate) async fn emit_explicit_skill_invocations(

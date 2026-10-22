@@ -2,9 +2,11 @@ use codex_protocol::protocol::Product;
 use codex_protocol::protocol::SkillScope;
 use codex_utils_absolute_path::AbsolutePathBuf;
 use codex_utils_path_uri::PathUri;
+use serde::Deserialize;
+use serde::Serialize;
 
 /// Metadata for one skill materialized on the host filesystem.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct SkillMetadata {
     pub name: String,
     pub description: String,
@@ -59,7 +61,7 @@ impl EnvironmentSkillMetadata {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
 pub struct SkillPolicy {
     pub allow_implicit_invocation: Option<bool>,
     // TODO: Enforce product gating in Codex skill selection/injection instead of only parsing and
@@ -67,7 +69,7 @@ pub struct SkillPolicy {
     pub products: Vec<Product>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SkillInterface {
     pub display_name: Option<String>,
     pub short_description: Option<String>,
@@ -77,12 +79,12 @@ pub struct SkillInterface {
     pub default_prompt: Option<String>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SkillDependencies {
     pub tools: Vec<SkillToolDependency>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SkillToolDependency {
     pub r#type: String,
     pub value: String,
