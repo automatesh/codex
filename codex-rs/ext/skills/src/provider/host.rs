@@ -97,7 +97,7 @@ impl SkillProvider for HostSkillProvider {
     }
 }
 
-fn catalog_from_outcome(outcome: &SkillLoadOutcome) -> SkillCatalog {
+pub(crate) fn catalog_from_outcome(outcome: &SkillLoadOutcome) -> SkillCatalog {
     let root_order_by_path = outcome
         .skill_roots_in_discovery_order()
         .enumerate()

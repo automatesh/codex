@@ -12,6 +12,8 @@ use codex_protocol::models::ResponseItem;
 use std::collections::BTreeMap;
 use std::io::Write;
 
+mod model_switch;
+
 fn dynamic_state(kind: &str) -> bool {
     matches!(
         kind,
@@ -249,14 +251,34 @@ pub fn capture_prompt_sources(prompt: &Prompt) -> Result<Vec<PolicySource>> {
 }
 
 fn unaccepted_sources(snapshot: &PolicySnapshot, sources: Vec<PolicySource>) -> Vec<PolicySource> {
-    sources
+    let mut pending: Vec<_> = sources
         .into_iter()
         .filter(|source| {
             snapshot
                 .verify_content(source.kind.clone(), &source.logical_id, &source.content)
                 .is_err()
         })
-        .collect()
+        .filter(|source| {
+            source.kind != SourceKind::InstructionFragment
+                || !source.logical_id.starts_with("model_switch.instructions:")
+                || !model_switch::approved_model_switch(snapshot, &source.content)
+        })
+        .collect();
+    if pending.iter().any(|source| {
+        source.kind == SourceKind::InstructionFragment
+            && source.logical_id.starts_with("host_skills.instructions:")
+    }) {
+        let expected = codex_skills_extension::approved_host_skills_fragments(snapshot)
+            .into_iter()
+            .map(|text| canonical_content(&text))
+            .collect::<Vec<_>>();
+        pending.retain(|source| {
+            source.kind != SourceKind::InstructionFragment
+                || !source.logical_id.starts_with("host_skills.instructions:")
+                || !expected.contains(&source.content)
+        });
+    }
+    pending
 }
 
 pub fn verify_prompt(config: &Config, prompt: &Prompt) -> codex_protocol::error::Result<()> {
@@ -403,6 +425,54 @@ mod tests {
         let unicode =
             "\u{0418}\u{043d}\u{0441}\u{0442}\u{0440}\u{0443}\u{043a}\u{0446}\u{0438}\u{044f}";
         assert_eq!(canonical_source_paths(unicode, root, &digest), unicode);
+    }
+
+    #[test]
+    fn model_switch_reuses_accepted_instructions_but_rejects_changed_text() {
+        use crate::context::ContextualUserFragment;
+        use crate::context::ModelSwitchInstructions;
+
+        let accepted = snapshot(Vec::new());
+        let rendered = ModelSwitchInstructions::new("instructions").render();
+        let source = PolicySource::new(
+            SourceKind::InstructionFragment,
+            format!("model_switch.instructions:{}", sha256(rendered.as_bytes())),
+            rendered,
+        );
+        assert!(unaccepted_sources(&accepted, vec![source.clone()]).is_empty());
+
+        let changed_text = ModelSwitchInstructions::new("Changed instructions").render();
+        let changed = PolicySource::new(
+            SourceKind::InstructionFragment,
+            format!(
+                "model_switch.instructions:{}",
+                sha256(changed_text.as_bytes())
+            ),
+            changed_text,
+        );
+        assert_eq!(
+            unaccepted_sources(&accepted, vec![changed.clone()]),
+            vec![changed]
+        );
+    }
+
+    #[test]
+    fn generated_fragment_labels_do_not_approve_unknown_content() {
+        let accepted = snapshot(Vec::new());
+        let sources = [
+            "host_skills.instructions:unknown",
+            "model_switch.instructions:unknown",
+        ]
+        .into_iter()
+        .map(|name| {
+            PolicySource::new(
+                SourceKind::InstructionFragment,
+                name,
+                "New instructions".into(),
+            )
+        })
+        .collect::<Vec<_>>();
+        assert_eq!(unaccepted_sources(&accepted, sources.clone()), sources);
     }
 
     #[test]

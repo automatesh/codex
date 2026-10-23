@@ -89,6 +89,7 @@ jobs:
         if: ${{ !cancelled() && inputs.resume_only == true }}
         run: |
           cargo test --locked -p codex-core --lib instruction_policy:: -- --test-threads=1
+          cargo test --locked -p codex-skills-extension --lib approved_render -- --test-threads=1
           cargo test --locked -p codex-core --lib resume_instructions -- --test-threads=1
       - name: Test full paginated instruction archives and retained history contracts
         if: ${{ !cancelled() && inputs.prefix_only != true }}

@@ -4,6 +4,7 @@ use std::sync::Arc;
 
 use codex_config::ConfigLayerStack;
 use codex_instruction_control::PolicySnapshot;
+use codex_instruction_control::PolicySource;
 use codex_instruction_control::SourceKind;
 use codex_skills::SkillError;
 use codex_skills::SkillMetadata;
@@ -12,6 +13,21 @@ use codex_utils_path_uri::PathUri;
 
 use crate::HostSkillsSnapshot;
 use crate::SkillLoadOutcome;
+
+pub(crate) fn approved_skill_metadata(
+    snapshot: &PolicySnapshot,
+    source: &PolicySource,
+    path: &AbsolutePathBuf,
+) -> Result<SkillMetadata, Box<dyn std::error::Error + Send + Sync>> {
+    let metadata = snapshot.resolve(SourceKind::SkillMetadata, &source.logical_id)?;
+    let mut skill: SkillMetadata = serde_json::from_str(metadata)?;
+    let original_path = skill.path_to_skills_md.to_abs_path()?;
+    if original_path.to_string_lossy() != source.logical_id {
+        return Err("Approved skill metadata belongs to a different source path".into());
+    }
+    skill.path_to_skills_md = PathUri::from_abs_path(path);
+    Ok(skill)
+}
 
 pub(crate) async fn load_approved_skills(
     snapshot: &PolicySnapshot,
@@ -31,15 +47,7 @@ pub(crate) async fn load_approved_skills(
             let path = AbsolutePathBuf::try_from(
                 snapshot.source_path(SourceKind::Skill, &source.logical_id)?,
             )?;
-            let metadata = snapshot.resolve(SourceKind::SkillMetadata, &source.logical_id)?;
-            let mut skill: SkillMetadata = serde_json::from_str(metadata)?;
-            let original_path = skill.path_to_skills_md.to_abs_path()?;
-            if original_path.to_string_lossy() != source.logical_id {
-                return Err::<_, Box<dyn std::error::Error + Send + Sync>>(
-                    "Approved skill metadata belongs to a different source path".into(),
-                );
-            }
-            skill.path_to_skills_md = PathUri::from_abs_path(&path);
+            let mut skill = approved_skill_metadata(snapshot, source, &path)?;
             if let Some(interface) = &mut skill.interface {
                 for icon in [&mut interface.icon_small, &mut interface.icon_large] {
                     if let Some(original) = icon {

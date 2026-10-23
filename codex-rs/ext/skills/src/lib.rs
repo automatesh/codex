@@ -1,4 +1,5 @@
 mod aliases;
+mod approved_render;
 mod approved_skills;
 pub mod catalog;
 mod catalog_prompt;
@@ -30,6 +31,7 @@ mod warnings;
 mod world_state;
 mod world_state_catalogs;
 
+pub use approved_render::approved_host_skills_fragments;
 pub use config::SkillsExtensionConfig;
 pub use extension::install;
 pub use extension::install_with_providers;
